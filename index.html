@@ -1272,6 +1272,63 @@ const salvageNearestBase=nearestSalvage;nearestSalvage=function(){const here=sal
 const salvageTargetBase=targetSalvage;targetSalvage=function(){const d=nearestSalvage();if(!d){toast('No loot in this system.');return}salvageTarget=d.id;target='salvage';auto=false;cruise=false;toast(d.name+' selected. Approach within 140 m and collect.');updateUI()};lootButton.onclick=()=>targetSalvage();
 window.flightCheckpoints.capture=()=>captureFlight();window.flightCheckpoints.restore=q=>restoreFlight(q);window.salvageControls={sell:()=>lootSaleButton.onclick(),target:()=>targetSalvage(),collect:collectSalvage,get drops(){return salvageDrops.map(d=>({...d}))}};combatJobUI();
 
+// Multi-part solo operations: initial hunt, physical recovery, reinforcements, return for settlement.
+const stagedJobs=[
+ {name:'Evidence trail',brief:'Eliminate the first patrol, collect evidence cargo, defeat reinforcements, then return.',waves:[2,2],reward:4800,rank:1,lootGoal:1},
+ {name:'Smuggler supply chain',brief:'Break the cargo escort, recover two loot crates, then defeat the response fleet.',waves:[3,3],reward:5700,rank:1,lootGoal:2},
+ {name:'Lunar cartel investigation',brief:'At Moon Base: take down scouts, recover cargo, then destroy the cartel leader.',waves:[2,1],reward:6900,rank:2,boss:true,dest:1,lootGoal:1},
+ {name:'Command Center recovery',brief:'Clear the thieves, recover two stolen crates, repel their backup, and dock.',waves:[3,3],reward:6500,rank:2,dest:0,lootGoal:2}
+];
+const firstStagedJob=combatJobs.length;combatJobs.push(...stagedJobs);
+function stagedOperation(){return combatOperation&&combatJobs[combatOperation.job]?.lootGoal?combatOperation:null}
+function stagedPhaseText(){const op=stagedOperation();if(!op)return '';const j=combatJobs[op.job];return op.stage==='recover'?'RECOVER LOOT '+(op.recovered||0)+'/'+j.lootGoal:op.stage==='reinforcements'?'DEFEAT REINFORCEMENTS':op.stage==='return'?'RETURN TO STATION / CLAIM PAYMENT':'ELIMINATE FIRST PATROL'}
+const stagedAccept=acceptCombatJob;acceptCombatJob=function(i){stagedAccept(i);const op=stagedOperation();if(op&&op.job===i){op.stage='hunt';op.recovered=0;op.recoveryIds=[];saveCheckpoint('auto',true);missionUI();updateUI()}};window.combatOperations.accept=i=>acceptCombatJob(i);
+// Stop the normal wave timer at the recovery stage, leaving loot physically in space.
+const stagedUpdate=update;update=function(dt){const op=stagedOperation();if(op&&op.stage==='hunt'&&!op.pending&&!pirates.some(p=>p.hull>0)&&save.system===op.system){op.stage='recover';op.delay=0;op.recoveryIds=salvageDrops.filter(d=>d.system===op.system).map(d=>d.id);radio('MISSION STAGE 2: recover '+combatJobs[op.job].lootGoal+' loot crates. Use Loot target and Collect loot.');saveCheckpoint('auto',true)}if(op&&op.stage==='recover'){const wave=op.wave;op.delay=-100000;stagedUpdate(dt);op.wave=wave;op.delay=0;}else stagedUpdate(dt)};
+const stagedCollect=collectSalvage;collectSalvage=function(){const op=stagedOperation(),d=nearestSalvage(),before=salvageDrops.length;stagedCollect();if(op&&op.stage==='recover'&&d&&salvageDrops.length<before&&d.system===op.system&&op.recoveryIds.includes(d.id)){op.recovered=(op.recovered||0)+1;if(op.recovered>=combatJobs[op.job].lootGoal){op.stage='reinforcements';op.wave=1;op.pending=true;op.delay=0;radio('MISSION STAGE 3: recovered cargo secured. Reinforcements inbound.');}saveCheckpoint('auto',true);updateUI()}};collectButton.onclick=()=>collectSalvage();window.salvageControls.collect=()=>collectSalvage();
+const stagedEvent=missionEvent;missionEvent=function(type,n=1){stagedEvent(type,n);const op=stagedOperation();if(op&&save.contract?.ready){op.stage='return';radio('FINAL STAGE: return to a station and claim '+save.contract.reward+' credits.');saveCheckpoint('auto',true)}};
+const stagedHUD=updateUI;updateUI=function(){stagedHUD();const op=stagedOperation();if(!op)return;const j=combatJobs[op.job];$('mission').textContent=j.name.toUpperCase();$('contractHUD').textContent=stagedPhaseText()+' · '+save.contract.progress+'/'+save.contract.goal+' HOSTILES · '+j.reward+' cr';if(op.stage==='recover'){$('objective').textContent='Recover '+j.lootGoal+' crates from the first patrol. Loot target → approach → Collect loot.';$('auto').textContent=auto?'Manual flight':'Approach selected target'}};
+const stagedMissionUI=missionUI;missionUI=function(){stagedMissionUI();const op=stagedOperation();if(op)$('missionBrief').textContent=combatJobs[op.job].brief+' Current stage: '+stagedPhaseText()+'. Your stage and recovered cargo are saved.'};
+// During recovery, target cycling cannot create extra patrols or bypass the mission stage.
+const stagedTarget=targetPirate;targetPirate=function(){if(stagedOperation()?.stage==='recover'){toast('Recover the dropped loot before engaging reinforcements.');targetSalvage();return}stagedTarget()};$('combatTarget').onclick=()=>targetPirate();
+combatJobUI();
+
+
+// Extended operations: repeatable patrol groups, long reinforcement campaigns and larger recovery stages.
+for(let i=0;i<combatJobs.length;i++){const j=combatJobs[i];if(j.lootGoal){j.waves=[3,...Array.from({length:13+i%3*3},(_,n)=>n%4===3?2:3)];if(j.boss)j.waves[j.waves.length-1]=1;j.lootGoal=3;j.reward*=4;j.brief+=' Extended campaign: '+j.waves.length+' combat waves with a three-crate recovery stage.';}else{const count=10+(i%5)*3;j.waves=Array.from({length:count},(_,n)=>n%4===0?2:3);if(j.boss)j.waves[count-1]=1;j.reward*=4;j.brief+=' Extended operation: '+count+' patrol waves. Save anytime and continue later.';}}
+// Migrate existing operations without losing kills: remaining campaign objectives count from the current wave.
+function extendActiveOperation(){const op=combatOperation,m=save.contract;if(!op||!m||m.combatJob!==op.job||m.ready)return;const j=combatJobs[op.job];m.goal=m.progress+j.waves.slice(op.wave+1).reduce((a,b)=>a+b,0)+(op.pending?j.waves[op.wave]:pirates.filter(p=>p.hull>0).length);if(op.pending&&op.wave===0)m.goal=j.waves.reduce((a,b)=>a+b,0);}
+const longRestore=restoreFlight;restoreFlight=function(q){const ok=longRestore(q);if(ok){extendActiveOperation();updateUI()}return ok};window.flightCheckpoints.restore=q=>restoreFlight(q);
+combatJobUI();
+
+// Forty distinct solo operation offers, using the saved combat/recovery campaign system.
+const additionalOperations=[
+ ['Outer belt warrants','Hunt fugitives hiding among outer-belt patrols.',0,0,false],
+ ['Lunar stolen shipments','Recover stolen lunar shipments after clearing the escorts.',1,1,true],
+ ['Command Center lockdown','Break the raider cordon around the command station.',0,2,false],
+ ['Crystal smugglers','Destroy crystal smugglers and recover their contraband.',2,1,true],
+ ['Refinery raider hunt','Clear armed scavengers threatening refinery traffic.',3,2,false],
+ ['Missing convoy evidence','Recover convoy evidence and defeat the thieves’ backup.',0,1,true],
+ ['Moon prison-break pursuit','Track escaped outlaws through lunar orbit.',1,2,false],
+ ['Black-market supply raid','Intercept black-market cargo and collect three supply crates.',2,2,true],
+ ['Frontier sheriff patrol','Clear a long succession of frontier criminal patrols.',4,1,false],
+ ['Titanium cargo recovery','Reclaim stolen titanium before fighting incoming raiders.',3,2,true],
+ ['Obsidian syndicate','Destroy syndicate escorts and their final command ship.',7,3,false],
+ ['Syndicate evidence seizure','Collect syndicate evidence before defeating its response force.',7,2,true],
+ ['Garden station protection','Protect orbital shipping from repeated criminal attacks.',4,1,false],
+ ['Hijacked transport salvage','Recover cargo from a hijacked transport’s criminal escorts.',5,2,true],
+ ['Deep-space warrant chain','Complete a prolonged series of armed fugitive interceptions.',6,3,false],
+ ['Lunar security recovery','Retrieve lunar security evidence and eliminate reinforcements.',1,2,true],
+ ['Command Center cartel trial','Defeat cartel patrols and a final armored leader.',0,3,false],
+ ['Frontier contraband cache','Recover hidden contraband released by the first patrol.',6,2,true],
+ ['Solar shipping cleanup','Sweep Earth orbit of organized cargo raiders.',0,2,false],
+ ['Remote colony supply rescue','Recover stolen colony supplies, then repel armed backup.',5,2,true],
+ ['Outlaw flagship pursuit','Destroy successive escorts and finish the outlaw flagship.',7,3,false],
+ ['Final evidence campaign','Recover three evidence crates and clear a long criminal fleet campaign.',0,3,true]
+];
+for(let i=0;i<additionalOperations.length;i++){const [name,brief,dest,rank,recovery]=additionalOperations[i],count=16+i%7*2,boss=i%5===0||i>=20,waves=Array.from({length:count},(_,n)=>n%4===0?2:3);if(recovery)waves[0]=3;if(boss)waves[count-1]=1;combatJobs.push({name,brief:brief+' '+count+' combat waves. Save and continue anytime.',dest,rank,waves,reward:14000+count*650+rank*1800,boss,...(recovery?{lootGoal:3}:{})});}
+combatJobUI();
+
 requestAnimationFrame(tick);
 })();
 </script>
