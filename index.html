@@ -254,7 +254,7 @@ surveyBeacon.x=station.x+3500;surveyBeacon.z=station.z+7000;
 // PASS 5 — pad assignment, separate hangar bays and animated station service robots.
 const pads=[{number:'07',x:0,y:-45,z:125},{number:'03',x:-65,y:-38,z:110},{number:'11',x:65,y:-38,z:160}];let assignedPad=0;
 function pad(){return pads[assignedPad]}
-function serviceMachinery(){const cz=station.z,cx=station.x,cy=station.y;for(const side of [-1,1]){let z=cz-120+((time*18+side*90)%280+280)%280,x=cx+side*106,y=cy-60;worldPolygon([[x-9,y,z-15],[x+9,y,z-15],[x+9,y,z+15],[x-9,y,z+15]],'#748997','#98d3e3');worldPolygon([[x-7,y,z-10],[x-7,y+13,z-10],[x+7,y+13,z-10],[x+7,y,z-10]],'#365a72');const p=worldPoint(x,y+15,z);if(p)ellipse(p.x,p.y,Math.max(1,2*focal/p.z),Math.max(1,2*focal/p.z),'#ffc774');segment([x,y+10,z],[x-side*12,cy-30+Math.sin(time*1.7)*7,z],'#bfd5de',2)}
+function serviceMachinery(){const cz=station.z,cx=station.x,cy=station.y;for(const side of [-1,1]){let z=cz+side*65,x=cx+side*106,y=cy-60;worldPolygon([[x-9,y,z-15],[x+9,y,z-15],[x+9,y,z+15],[x-9,y,z+15]],'#748997','#98d3e3');worldPolygon([[x-7,y,z-10],[x-7,y+13,z-10],[x+7,y+13,z-10],[x+7,y,z-10]],'#365a72');const p=worldPoint(x,y+15,z);if(p)ellipse(p.x,p.y,Math.max(1,2*focal/p.z),Math.max(1,2*focal/p.z),'#ffc774');segment([x,y+10,z],[x-side*12,cy-30+Math.sin(time*1.7)*7,z],'#bfd5de',2)}
 for(let i=0;i<pads.length;i++){const p=pads[i],x=cx+p.x,z=cz+p.z;worldPolygon([[x-27,cy-76,z-35],[x+27,cy-76,z-35],[x+27,cy-76,z+35],[x-27,cy-76,z+35]],i===assignedPad?'#52696c':'#2c454f',i===assignedPad?'#a9ffe1':'#6c8ca5');const label=worldPoint(x,cy-70,z+15);if(label&&label.z>35){ctx.fillStyle=i===assignedPad?'#b5ffe4':'#88b5c7';ctx.textAlign='center';ctx.font='14px system-ui';ctx.fillText(p.number,label.x,label.y)}}}
 const padSelected=selected;selected=function(){const o=padSelected();if(target==='station'&&dockPhase==='tunnel')return{x:station.x+pad().x,y:station.y+pad().y,z:station.z+pad().z,r:30};return o};const padAction=action;action=function(){const granting=state==='flight'&&target==='station'&&!clearance;if(granting)assignedPad=(save.completed+save.rescues)%pads.length;padAction();if(granting&&clearance)radio('CONTROL: docking clearance granted. Assigned pad '+pad().number+'. Approach speed limit 70 m/s.');if(state==='dock'){$('dockTitle').textContent=currentSystem().station+' / Pad '+pad().number;ship.x=station.x+pad().x;ship.y=station.y+pad().y;ship.z=station.z+pad().z}};
 const padUI=updateUI;updateUI=function(){padUI();if(target==='station'&&clearance){$('action').textContent='Land pad '+pad().number;$('objective').textContent='PAD '+pad().number+' / '+(dockPhase==='tunnel'?'Land below 25 m/s':'Follow entrance lights')}};
@@ -1007,7 +1007,7 @@ const simMetricsBase=civicMetrics;civicMetrics=function(i){const m=simMetricsBas
 window.settlementGalaxy.select=i=>{if(Number.isInteger(i)&&i>=0&&i<40){estateSelect=i;if(!livingPanel.classList.contains('hidden'))livingFocus=i;estateSync();}};
 
 // PASS 1 — Earth/Moon destinations, interactive sector map and flight planning.
-Object.assign(systems[0],{name:'Earth orbit',station:'Sol Station',color:'#438fea'});
+Object.assign(systems[0],{name:'Earth orbit',station:'Gods Command Center',color:'#438fea'});
 Object.assign(systems[1],{name:'Lunar orbit',station:'Moon Base',x:3,y:1,color:'#b7bfcb'});
 Object.assign(systems[2],{name:'Gods Reach',station:'Gods Base of Operations'});
 Object.assign(regionStyles[0],{kind:'Earth orbital civilization',hazard:'None',haze:'#092340'});
@@ -1151,7 +1151,7 @@ const cartoonNpcBase=npcShip;npcShip=function(n,hostile=false){cartoonNpcBase(n,
 const cartoonPlayerBase=drawPlayerShip;drawPlayerShip=function(){cartoonPlayerBase();if(!cartoonOn()||view!=='chase')return;const cx=width/2,cy=height*.61,s=clamp(width/900,.7,1.35);ctx.save();ctx.globalAlpha=.6;ctx.lineCap='round';for(let i=0;i<4;i++){const sway=Math.sin(time*18+i)*5*s;ctx.strokeStyle=i%2?'#5ce7ff':'#fff2aa';ctx.lineWidth=(7-i)*s;ctx.beginPath();ctx.moveTo(cx+(i-1.5)*15*s,cy+68*s);ctx.quadraticCurveTo(cx+(i-1.5)*23*s+sway,cy+105*s,cx+(i-1.5)*31*s,cy+145*s+ship.speed*.05);ctx.stroke()}ctx.restore()};
 
 // CARTOON PASS 6 — the station gets neon ink rings, navigation chevrons and lively signage.
-const cartoonStationBase=stationDraw;stationDraw=function(){cartoonStationBase();if(!cartoonOn())return;const p=worldPoint(station.x,station.y+40,station.z);if(!p)return;const d=Math.max(1,distance(station)),s=clamp(150000/d,18,240);ctx.save();comicOval(p.x,p.y,s,s*.34,'#071018',Math.max(3,s*.035),.9,time*.025);comicOval(p.x,p.y,s*1.06,s*.38,'#7ef0c8',Math.max(2,s*.018),.66,-time*.018);if(d<2600){for(let i=0;i<5;i++){const a=time*.45+i*Math.PI*2/5,x=p.x+Math.cos(a)*s*1.18,y=p.y+Math.sin(a)*s*.44;comicStar(x,y,clamp(s*.045,3,9),i%2?'#7ef0c8':'#ffe28a','#071018',4,-a)}}if(d<1600)comicLabel(currentSystem().station.toUpperCase(),p.x,p.y-s*.58,'#baffdf',clamp(s/120,.72,1.15));ctx.restore()};
+const cartoonStationBase=stationDraw;stationDraw=function(){cartoonStationBase()};
 
 // CARTOON PASS 7 — laser bolts, explosion blooms and on-screen action words.
 const cartoonCombatBase=combatEffects;combatEffects=function(){cartoonCombatBase();if(!cartoonOn())return;for(const b of bolts){const p=worldPoint(b.x,b.y,b.z);if(!p)continue;ctx.save();ctx.globalAlpha=clamp(b.life,0,1);comicStar(p.x,p.y,b.enemy?7:6,b.enemy?'#ff6b64':'#9efff0','#071018',4,time*4);ctx.restore()}for(const b of bursts){const p=worldPoint(b.x,b.y,b.z);if(!p)continue;const power=b.life>.4?clamp(b.life,0,1):clamp(b.life*5,0,1),r=18+power*42;ctx.save();ctx.globalAlpha=clamp(power*1.6,0,1);comicStar(p.x,p.y,r,'#ffb457','#071018',10,time*.8);comicStar(p.x,p.y,r*.54,'#fff3ad','#071018',7,-time);if(r>30)comicLabel(b.life>.5?'KRAK!':'ZAP!',p.x,p.y-r*.9,'#fff0a6',clamp(r/45,.7,1.2));ctx.restore()}};
@@ -1201,7 +1201,7 @@ const combatJobs=[
  {name:'Station perimeter patrol',brief:'Repel three raider patrols outside station weapons limits.',waves:[3,3,3],reward:3900,rank:0},
  {name:'Heavy salvage hunters',brief:'Destroy armored scavengers protecting stolen salvage.',waves:[2,3,2],reward:4300,rank:2},
  {name:'Moon blockade',brief:'Travel to Moon Base and break four blockade groups.',waves:[2,3,3,2],reward:5600,rank:1,dest:1},
- {name:'Sol defense',brief:'Travel to Sol Station and clear four assault waves.',waves:[3,3,2,3],reward:5900,rank:2,dest:0},
+ {name:'Command Center defense',brief:'Travel to Gods Command Center and clear four assault waves.',waves:[3,3,2,3],reward:5900,rank:2,dest:0},
  {name:'Dreadnought escort',brief:'Defeat two escort waves, then the armored command ship.',waves:[3,3,1],reward:6500,rank:2,boss:true},
  {name:'Endless frontier contract',brief:'Five waves of mixed enemies with a final command ship.',waves:[3,3,3,3,1],reward:8200,rank:3,boss:true}
 ];
@@ -1222,6 +1222,13 @@ const combatOpsHUD=updateUI;updateUI=function(){combatOpsHUD();if(combatOperatio
 const combatCapture=captureFlight;captureFlight=function(){const q=combatCapture();q.combatOperation=combatOperation?{...combatOperation}:null;return q};
 const combatRestore=restoreFlight;restoreFlight=function(q){const ok=combatRestore(q);if(ok){const op=q.combatOperation;combatOperation=op&&Number.isInteger(op.job)&&combatJobs[op.job]&&Number.isInteger(op.wave)&&op.wave>=0&&op.wave<combatJobs[op.job].waves.length?{...op}:null;updateUI();combatJobUI()}return ok};window.flightCheckpoints.capture=()=>captureFlight();window.flightCheckpoints.restore=q=>restoreFlight(q);
 window.combatOperations={accept:acceptCombatJob,get jobs(){return combatJobs.map(j=>({...j,waves:[...j.waves]}))},get active(){return combatOperation?{...combatOperation}:null}};combatJobUI();
+
+
+// Quiet station approach: two exterior transports; no traffic circles through the hangar.
+function quietStationTraffic(){traffic.splice(2);for(const n of traffic){n.x=station.x+1800;n.y=station.y+420;n.z=station.z-1300}}
+trafficUpdate=function(dt){if(!['flight','dock'].includes(state))return;radioCooldown=Math.max(0,radioCooldown-dt);traffic.splice(2);for(let i=0;i<traffic.length;i++){const n=traffic[i];n.phase+=dt*.018;const u=(n.phase%2+2)%2,t=u<1?u:2-u;n.x=station.x+(i?1:-1)*(900+t*1300);n.y=station.y+360+i*120;n.z=station.z-1100+i*300;n.yaw=(u<1?1:-1)*(i?1:-1)*Math.PI/2;n.pitch=0;}}
+quietStationTraffic();
+const quietRestore=restoreFlight;restoreFlight=function(q){const ok=quietRestore(q);if(ok)quietStationTraffic();return ok};window.flightCheckpoints.restore=q=>restoreFlight(q);
 
 requestAnimationFrame(tick);
 })();
