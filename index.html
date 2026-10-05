@@ -1230,6 +1230,17 @@ trafficUpdate=function(dt){if(!['flight','dock'].includes(state))return;radioCoo
 quietStationTraffic();
 const quietRestore=restoreFlight;restoreFlight=function(q){const ok=quietRestore(q);if(ok)quietStationTraffic();return ok};window.flightCheckpoints.restore=q=>restoreFlight(q);
 
+// Explicit manual weapon trigger: key press fires immediately; holding F repeats through combatUpdate.
+let manualWeaponFeedback=0,weaponFlashUntil=0;
+function manualWeaponTrigger(){if(state!=='flight')return;if(target==='mine'){fireShot();return}if(distance(station)<650){if(time>manualWeaponFeedback){toast('Weapons locked: fly at least 650 m from the station.');manualWeaponFeedback=time+1.5}return}if(ship.heat>=94){if(time>manualWeaponFeedback){toast('Weapons overheated: wait for the heat meter to drop.');manualWeaponFeedback=time+1.5}return}if(cruise){cruise=false;cruiseWarm=0;toast('Cruise disengaged. Weapons ready.')}fireShot();updateUI()}
+addEventListener('keydown',e=>{if(e.code!=='KeyF'&&String(e.key).toLowerCase()!=='f')return;const tag=e.target?.tagName;if(['INPUT','TEXTAREA','SELECT'].includes(tag)||e.target?.isContentEditable)return;e.preventDefault();if(state!=='flight')return;keys.add('f');if(!e.repeat)manualWeaponTrigger()});
+addEventListener('keyup',e=>{if(e.code==='KeyF'||String(e.key).toLowerCase()==='f')keys.delete('f')});addEventListener('blur',()=>{keys.delete('f');firing=false});
+$('fire').textContent='Fire / hold F';$('fire').title='Hold F or hold this button to fire. Weapons unlock 650 m from stations.';
+$('fire').addEventListener('pointerdown',()=>manualWeaponTrigger());
+const explicitFireBase=fireShot;fireShot=function(){const n=bolts.length;explicitFireBase();if(bolts.length>n)weaponFlashUntil=time+.12};
+const explicitFireRender=render;render=function(){explicitFireRender();if(state!=='flight'||time>=weaponFlashUntil)return;ctx.save();ctx.globalAlpha=(weaponFlashUntil-time)/.12*.8;for(const side of [-1,1]){const x=width/2+side*width*.12,y=height*.72;comicStar(x,y,15,'#baffed','#267c91',5,side*time)}ctx.restore()};
+window.weaponControls={fire:manualWeaponTrigger};
+
 requestAnimationFrame(tick);
 })();
 </script>
