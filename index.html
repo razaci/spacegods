@@ -2098,9 +2098,7 @@ requestAnimationFrame(yardOverlay);inspectUI();log('Live-yard command layer onli
 
 
 <style id="shipworks-boot-fix-style">
-#shipworksBootBadge{position:absolute;top:54px;left:50%;transform:translateX(-50%);z-index:120;pointer-events:auto;background:#ffd08b;color:#151008;border:2px solid #fff0c8;font-weight:1000;padding:10px 18px;box-shadow:0 0 24px #ffd08b66}
 #shipworksPanel:not(.hidden){display:flex!important;z-index:999!important}
-@media(max-width:600px){#shipworksBootBadge{top:52px;font-size:10px;padding:8px 10px}}
 </style>
 <script id="shipworks-independent-bootstrap">
 (()=>{
@@ -2121,7 +2119,7 @@ requestAnimationFrame(yardOverlay);inspectUI();log('Live-yard command layer onli
  q('shipworksClose')?.addEventListener('click',e=>{e.preventDefault();close()});q('swConstruct')?.addEventListener('click',e=>{e.preventDefault();e.stopImmediatePropagation();construct()},true);q('swRandom')?.addEventListener('click',()=>setTimeout(draw,0));panel.querySelectorAll('input,select').forEach(el=>el.addEventListener('input',draw));
  ['hardShipyardHud','hardShipyardStart','shipyardHardOpen','enterGodsShipworks','enterShipyardTerminal','openShipworks'].forEach(id=>{const b=q(id);if(b){const clone=b.cloneNode(true);b.replaceWith(clone);clone.addEventListener('click',e=>{e.preventDefault();open()})}});
  // Guaranteed visible access while flying/start screen.
- if(!q('shipworksBootBadge')){const b=document.createElement('button');b.id='shipworksBootBadge';b.textContent='⚒ GODS SHIPWORKS';b.title='Open the independent GODS Shipworks construction yard';b.addEventListener('click',open);document.body.appendChild(b)}
+ q('shipworksBootBadge')?.remove()
  draw();
 })();
 </script>
