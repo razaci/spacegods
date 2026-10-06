@@ -1191,27 +1191,6 @@ function openFlightControls(){if(state==='menu'||state==='lost')return;controlsR
 controlButton.onclick=dockControlButton.onclick=openFlightControls;$('flightControlClose').onclick=()=>{state=controlsReturn;controlPanel.classList.add('hidden');updateUI()};$('flightSaveNow').onclick=()=>{saveCheckpoint('auto');controlUI()};$('flightLoadAuto').onclick=()=>loadCheckpoint('auto');$('flightSensitivity').oninput=e=>sensitivity=Number(e.target.value);$('flightCamera').onclick=()=>{view=view==='cockpit'?'chase':'cockpit';controlUI()};$('flightStop').onclick=()=>{setThrottle(0);ship.speed=0;boost=0;controlUI()};$('flightManual').onclick=()=>{voyage=null;missionAssist=null;auto=false;dockingGuidance=false;cruise=false;controlUI()};$('flightSound').onclick=sound;$('flightFull').onclick=fullscreen;
 $('flightExport').onclick=()=>{const blob=new Blob([JSON.stringify(captureFlight())],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='space-gods-full-save.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};$('flightImport').onclick=()=>$('flightImportFile').click();$('flightImportFile').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>4e6)throw Error('Save file is too large');const q=JSON.parse(await file.text());if(!restoreFlight(q))throw Error('Invalid save format');saveCheckpoint('auto',true);toast('Imported full game state.')}catch(e){toast('Import failed: '+e.message)}e.target.value=''};
 const oldLaunch=$('launch').onclick;$('launch').textContent=checkpointBook().auto?'Continue saved game':'Start game';$('launch').onclick=()=>{if(!loadCheckpoint('auto'))oldLaunch()};
-// Lightweight location memory: intentionally tiny so it still works when the large checkpoint cannot fit localStorage.
-const positionKey='spacegods.position.v1';
-function savePositionMemory(){
- if(!['flight','dock','jump','landing','liftoff','pause','controls','nav','dockrequest'].includes(state))return false;
- try{localStorage.setItem(positionKey,JSON.stringify({v:1,at:Date.now(),system:save.system,state:stableFlightState(),x:ship.x,y:ship.y,z:ship.z,yaw:ship.yaw,pitch:ship.pitch,speed:ship.speed,throttle:ship.throttle,hull:ship.hull,fuel:ship.fuel,target,carrying,clearance,dockPhase,podRoute,view}));return true}catch(e){return false}
-}
-function loadPositionMemory(){
- try{const q=JSON.parse(localStorage.getItem(positionKey)||'null');if(!q||q.v!==1||!Number.isInteger(q.system)||q.system<0||q.system>=systems.length||!['x','y','z','yaw','pitch'].every(k=>Number.isFinite(q[k])))return false;
- save.system=q.system;Object.assign(ship,{x:q.x,y:q.y,z:q.z,yaw:q.yaw,pitch:q.pitch,speed:Number.isFinite(q.speed)?q.speed:0,hull:Number.isFinite(q.hull)?q.hull:100,fuel:Number.isFinite(q.fuel)?q.fuel:100});
- target=q.target||'station';carrying=!!q.carrying;clearance=!!q.clearance;dockPhase=q.dockPhase||'hold';podRoute=q.podRoute||'pod';view=q.view==='chase'?'chase':'cockpit';auto=false;boost=0;keys.clear();releaseMouse();
- state=q.state==='dock'?'dock':'flight';for(const id of ['start','pausePanel','dockPanel','lostPanel','navPanel','commandPanel','dockingPanel','stationBuilder','flightControlMenu'])$(id)?.classList.add('hidden');
- setThrottle(Number.isFinite(q.throttle)?q.throttle:0);$('hud').style.display=state==='dock'?'none':'block';if(state==='dock'){$('dockPanel').classList.remove('hidden');dockUI();}updateUI();toast('Position restored · '+currentSystem().name+' system.');return true
- }catch(e){return false}
-}
-let positionSaveClock=0;
-const positionUpdateBase=update;update=function(dt){positionUpdateBase(dt);positionSaveClock+=dt;if(positionSaveClock>=2){positionSaveClock=0;savePositionMemory()}};
-// Continue uses the full checkpoint first, then the small location memory as a reliable fallback.
-const launchWithMemory=$('launch').onclick;$('launch').textContent=(checkpointBook().auto||localStorage.getItem(positionKey))?'Continue where I was':'Start game';$('launch').onclick=()=>{if(loadCheckpoint('auto'))return;if(loadPositionMemory())return;launchWithMemory()};
-window.addEventListener('pagehide',savePositionMemory);document.addEventListener('visibilitychange',()=>{if(document.hidden)savePositionMemory()});
-window.flightPositionMemory={save:savePositionMemory,load:loadPositionMemory};
-
 window.flightCheckpoints={save:saveCheckpoint,load:loadCheckpoint,capture:captureFlight,restore:restoreFlight,open:openFlightControls};
 window.addEventListener('pagehide',()=>saveCheckpoint('auto',true));document.addEventListener('visibilitychange',()=>{if(document.hidden)saveCheckpoint('auto',true)});
 
@@ -1450,13 +1429,13 @@ const baseJobThemes=['Perimeter patrol','Supply convoy escort','Stolen cargo rec
 for(const sector of [3,5,6])for(let k=0;k<baseJobThemes.length;k++){const recovery=[2,4,9].includes(k),escort=[1,7].includes(k),boss=[8,11].includes(k),count=12+k,waves=Array.from({length:count},(_,n)=>n%4===0?2:3);if(recovery)waves[0]=3;if(boss)waves[count-1]=1;combatJobs.push({name:systems[sector].station.replace(' Base','')+' · '+baseJobThemes[k],brief:(escort?'Protect the transport while defeating criminal patrols. ':recovery?'Clear the first patrol, recover three loot crates, and defeat reinforcements. ':boss?'Hunt criminal escorts and destroy their command ship. ':'Clear wanted patrols around this remote base. ')+count+' waves.',dest:sector,rank:1+k%3,waves,reward:16000+k*1700,escort,boss,...(recovery?{lootGoal:3}:{})});}
 let baseMissionFilter=3;
 const baseMissionPanel=document.createElement('div');baseMissionPanel.id='baseMissionPanel';baseMissionPanel.className='overlay hidden';baseMissionPanel.style.zIndex='90';baseMissionPanel.innerHTML='<div class="panel" style="width:min(820px,95vw);max-height:92dvh;overflow:auto"><h2>Remote base mission desk</h2><p id="baseMissionSummary"></p><div class="row" style="flex-wrap:wrap"><button id="baseFilter3">Dusk Fortress</button><button id="baseFilter5">Haven Rescue</button><button id="baseFilter6">Aster Deep Space</button><button id="baseFilterAll">All bases</button></div><div id="baseMissionCards"></div><button id="baseMissionClose" class="primary" style="position:sticky;bottom:0;width:100%">Back to station</button></div>';document.body.appendChild(baseMissionPanel);
-function baseMissionUI(){const jobs=combatJobs.map((j,i)=>({j,i})).filter(o=>o.i>=baseJobStart&&(baseMissionFilter===-1||o.j.dest===baseMissionFilter));$('baseMissionSummary').textContent='36 remote-base operations · '+(save.contract?'An active contract is already aboard. Finish or abandon it before accepting another.':'Choose a job. Missions take place at the named base; use the space map to reach it.');$('baseMissionCards').innerHTML=jobs.map(({j,i})=>'<article class="commandcard"><h3>'+baseJobThemes[(i-baseJobStart)%12]+'</h3><p>'+systems[j.dest].station+' · '+j.waves.length+' waves · '+j.reward+' cr base</p><p>'+j.brief+'</p><button id="baseAccept'+i+'" '+(save.contract?'disabled':'')+'>Accept contract</button></article>').join('');for(const {i} of jobs)$('baseAccept'+i).onclick=()=>{if(state!=='basemissions'||save.contract)return;state='dock';acceptCombatJob(i);baseMissionPanel.classList.add('hidden');dockUI();missionUI();$('dockMsg').textContent='Contract accepted for '+systems[combatJobs[i].dest].station+'. Use Space map to travel there.';};}
+function baseMissionUI(){const jobs=combatJobs.map((j,i)=>({j,i})).filter(o=>o.i>=baseJobStart&&!o.j.journalOnly&&(baseMissionFilter===-1||o.j.dest===baseMissionFilter));$('baseMissionSummary').textContent='36 remote-base operations · '+(save.contract?'An active contract is already aboard. Finish or abandon it before accepting another.':'Choose a job. Missions take place at the named base; use the space map to reach it.');$('baseMissionCards').innerHTML=jobs.map(({j,i})=>'<article class="commandcard"><h3>'+baseJobThemes[(i-baseJobStart)%12]+'</h3><p>'+systems[j.dest].station+' · '+j.waves.length+' waves · '+j.reward+' cr base</p><p>'+j.brief+'</p><button id="baseAccept'+i+'" '+(save.contract?'disabled':'')+'>Accept contract</button></article>').join('');for(const {i} of jobs)$('baseAccept'+i).onclick=()=>{if(state!=='basemissions'||save.contract)return;state='dock';acceptCombatJob(i);baseMissionPanel.classList.add('hidden');dockUI();missionUI();$('dockMsg').textContent='Contract accepted for '+systems[combatJobs[i].dest].station+'. Use Space map to travel there.';};}
 function openBaseMissions(){if(state!=='dock')return;baseMissionFilter=[3,5,6].includes(save.system)?save.system:3;state='basemissions';baseMissionPanel.classList.remove('hidden');baseMissionUI()}
 for(const i of [3,5,6])$('baseFilter'+i).onclick=()=>{baseMissionFilter=i;baseMissionUI()};$('baseFilterAll').onclick=()=>{baseMissionFilter=-1;baseMissionUI()};$('baseMissionClose').onclick=()=>{state='dock';baseMissionPanel.classList.add('hidden');updateUI()};
 const baseMissionButton=document.createElement('button');baseMissionButton.textContent='Remote base missions · 36';$('depart').after(baseMissionButton);baseMissionButton.onclick=openBaseMissions;
 // Keep the long remote-base catalogue in its menu instead of adding it to the main board.
 combatJobUI=function(){$('combatJobCards').innerHTML=combatJobs.slice(0,baseJobStart).map((j,i)=>'<article class="commandcard"><b>'+j.name+'</b><p>'+j.brief+' '+j.waves.length+' waves · '+j.reward+' cr</p><button id="combatJob'+i+'" '+(save.contract?'disabled':'')+'>Accept operation</button></article>').join('');for(let i=0;i<baseJobStart;i++)$('combatJob'+i).onclick=()=>acceptCombatJob(i)};
-const baseState=stableFlightState;stableFlightState=function(){return state==='basemissions'?'dock':baseState()};const baseRestore=restoreFlight;restoreFlight=function(q){baseMissionPanel.classList.add('hidden');return baseRestore(q)};window.flightCheckpoints.restore=q=>restoreFlight(q);window.baseMissionDesk={open:openBaseMissions,get count(){return combatJobs.length-baseJobStart}};combatJobUI();
+const baseState=stableFlightState;stableFlightState=function(){return state==='basemissions'?'dock':baseState()};const baseRestore=restoreFlight;restoreFlight=function(q){baseMissionPanel.classList.add('hidden');return baseRestore(q)};window.flightCheckpoints.restore=q=>restoreFlight(q);window.baseMissionDesk={open:openBaseMissions,get count(){return combatJobs.slice(baseJobStart).filter(j=>!j.journalOnly).length}};combatJobUI();
 
 let travelScene=null,cinematicPreviousView=null;
 const travelSkip=document.createElement('button');travelSkip.id='travelSkip';travelSkip.textContent='Skip scene';travelSkip.hidden=true;travelSkip.style.cssText='position:fixed;right:16px;top:16px;z-index:9999;padding:12px 18px;background:#071322;color:#c9fff3;border:1px solid #7ae9dd;border-radius:10px';document.body.appendChild(travelSkip);
@@ -1502,190 +1481,34 @@ const wanderingRender=render;
 render=function(){wanderingRender();if(!scenicFlight.active||state!=='flight')return;ctx.save();const t=scenicFlight.elapsed;for(let i=0;i<3;i++){const phase=((t+i*47)%150)/150;if(phase<.15||phase>.82)continue;const fade=Math.min(1,(phase-.15)*8,(.82-phase)*8);const x=width*(.12+phase*.76),y=height*(.22+i*.13)+Math.sin(t*.018+i)*height*.025;const size=(i===1?11:7)*Math.min(width/1000,1.4);ctx.globalAlpha=fade*.5;ctx.fillStyle=i===1?'#a2b4c7':'#8198a9';ctx.beginPath();ctx.moveTo(x-size,y);ctx.lineTo(x+size,y-size*.22);ctx.lineTo(x+size*.65,y+size*.3);ctx.lineTo(x-size*.6,y+size*.3);ctx.closePath();ctx.fill();ctx.fillStyle='#87c8e3';ctx.globalAlpha=fade*.35;ctx.fillRect(x-size*1.5,y, size*.55,1); }ctx.restore();};
 const wanderStyle=document.createElement('style');wanderStyle.textContent='#scenicFlightPanel{bottom:max(12px,env(safe-area-inset-bottom));padding:8px!important;background:#061625aa!important} #scenicFlightCaption{font-size:12px}';document.head.appendChild(wanderStyle);
 
+window.scenicCruise={toggle:toggleScenicFlight,stop:stopScenicFlight,get status(){return {...scenicFlight}},setEncounters(on){scenicFlight.encounters=!!on;scenicFlight.nextEncounter=90;scenicUI();}};
 
-// Elite-style supercruise, orbital locks, and flight-assist toggle.
-{
-  let flightAssist=true;
-  try { flightAssist = localStorage.getItem('spacegods-fa') !== '0'; } catch (e) {}
-  const faVel={x:0,y:0,z:0};
-  const sc={active:false,charging:0,x:900,y:30,z:-240,targetId:'station',orbit:null};
-  const planetNames=['Cinder','Lumen','Vale','Shard','Helion','Mercy','Dust','Riven'];
-  const moonNames=['Iris','Keel','Moth','Quill','Sable','Tarn','Umber','Wisp'];
-  function scBodies(){
-    const i=save.system||0, s=systems[i], hue=s.color||'#8fd0ff';
-    return [
-      {id:'star', name:s.name+' Primary', kind:'star', x:0, y:0, z:0, r:70, color:'#ffd27a'},
-      {id:'p1', name:planetNames[i%8]+' I', kind:'planet', x:460, y:18, z:70, r:26, color:hue},
-      {id:'p2', name:planetNames[i%8]+' II', kind:'planet', x:-240, y:-36, z:620, r:16, color:'#9ec4de'},
-      {id:'moon', name:moonNames[i%8], kind:'planet', x:520, y:34, z:108, r:7, color:'#d9c7a2'},
-      {id:'station', name:s.station, kind:'station', x:498, y:22, z:96, r:3.2, color:'#9aefff'},
-      {id:'signal', name:'Unidentified signal', kind:'signal', x:180, y:48, z:-360, r:1.6, color:'#ffb0ea'}
-    ];
-  }
-  function scBody(id){return scBodies().find(b=>b.id===id)||scBodies()[4];}
-  function scFwd(){const cp=Math.cos(ship.pitch);return {x:Math.sin(ship.yaw)*cp,y:Math.sin(ship.pitch),z:Math.cos(ship.yaw)*cp};}
-  function scDist(b){return Math.hypot(b.x-sc.x,b.y-sc.y,b.z-sc.z);}
-  function scAlign(b){const d=scDist(b)||1,f=scFwd();return ((b.x-sc.x)/d)*f.x+((b.y-sc.y)/d)*f.y+((b.z-sc.z)/d)*f.z;}
-  function fmtLs(ls){if(ls<0.02)return Math.max(1,Math.round(ls*299792))+' km';if(ls<10)return ls.toFixed(2)+' ls';return Math.round(ls)+' ls';}
-  function hostileNearby(){return typeof pirates!=='undefined'&&pirates.some(p=>p.hull>0&&distance(p)<2200);}
-  function stopHelpers(){auto=false;cruise=false;boost=0;if(window.scenicCruise&&window.scenicCruise.status&&window.scenicCruise.status.active)window.scenicCruise.stop('Scenic flight ended.');}
-  function scPlace(kind){
-    if(kind==='station'){ship.x=station.x;ship.y=station.y+8;ship.z=station.z-1500;ship.yaw=0;ship.pitch=0;target='station';}
-    else if(kind==='signal'){ship.x=station.x+900;ship.y=station.y+80;ship.z=station.z+700;ship.yaw=Math.PI*.75;ship.pitch=0;if(typeof spawnPirates==='function'){try{spawnPirates(true);}catch(e){}}}
-    else {ship.x=station.x-600;ship.y=station.y+40;ship.z=station.z+400;ship.yaw=-.4;ship.pitch=-.12;}
-    ship.speed=18;setThrottle(.2);faVel.x=faVel.y=faVel.z=0;
-  }
-  function scDrop(emergency){
-    if(!sc.active)return;
-    const b=scBody(sc.targetId), d=scDist(b), dot=scAlign(b);
-    const dropRange=b.kind==='star'?40:b.kind==='station'?8:b.kind==='signal'?12:18;
-    const safe=d<dropRange&&dot>0.9&&ship.throttle<0.82&&!emergency;
-    if(!safe&&!emergency){toast(d>=dropRange?'Too far to drop. Close under '+dropRange+' ls.':dot<=0.9?'Align with the destination lock.':'Throttle down into the blue zone.');return;}
-    sc.active=false;sc.charging=0;scPlace(b.kind);sc.orbit=b.kind==='planet'||b.kind==='star'?b.name:null;
-    if(emergency){ship.hull=Math.max(8,ship.hull-12);toast('Emergency drop. Hull strained. Normal space restored.');}
-    else toast('Safe dropout at '+b.name+'. Normal space.');
-    if(window.flightCheckpoints)window.flightCheckpoints.capture();
-  }
-  function scEnter(){
-    sc.charging=0;sc.active=true;sc.orbit=null;sc.x=860;sc.y=24;sc.z=-220;
-    if(!scBodies().some(b=>b.id===sc.targetId))sc.targetId='station';
-    ship.speed=0;setThrottle(.45);faVel.x=faVel.y=faVel.z=0;keys.clear();
-    toast('Supercruise engaged. Lock a body, stay in the blue zone, then drop.');
-  }
-  function scEngage(){
-    if(sc.active){scDrop(false);return;}
-    if(state!=='flight'){toast('Launch before engaging the frameshift drive.');return;}
-    if(sc.charging>0)return;
-    if(hostileNearby()){toast('Hostiles nearby. Clear them before supercruise.');return;}
-    if(typeof clearance!=='undefined'&&clearance){toast('Cancel docking clearance before supercruise.');return;}
-    if(typeof voyage!=='undefined'&&voyage){toast('Finish the automated route before supercruise.');return;}
-    stopHelpers();sc.charging=3.2;toast('Frameshift charging. Hold your line.');
-  }
-  function scCycle(step){
-    const list=scBodies();
-    let i=list.findIndex(b=>b.id===sc.targetId);
-    i=(i+step+list.length)%list.length;sc.targetId=list[i].id;toast('Nav lock: '+list[i].name);
-  }
-  function scSteer(dt){
-    let yawInput=stick.x+(keys.has('d')||keys.has('arrowright')?1:0)-(keys.has('a')||keys.has('arrowleft')?1:0);
-    let pitchInput=-stick.y+(keys.has('w')&&!keys.has('shift')||keys.has('arrowup')?1:0)-(keys.has('s')&&!keys.has('shift')||keys.has('arrowdown')?1:0);
-    if(keys.has('shift'))setThrottle(ship.throttle+((keys.has('w')?1:0)-(keys.has('s')?1:0))*dt*.5);
-    ship.yaw+=clamp(yawInput,-1,1)*dt*.7;ship.pitch=clamp(ship.pitch+clamp(pitchInput,-1,1)*dt*.55,-1.2,1.2);
-    bank+=(clamp(-yawInput,-1,1)*.3-bank)*Math.min(1,dt*3);
-  }
-  function scStep(dt){
-    if(sc.charging>0){sc.charging=Math.max(0,sc.charging-dt);if(sc.charging===0)scEnter();return;}
-    if(!sc.active||state!=='flight')return;
-    scSteer(dt);
-    const b=scBody(sc.targetId), d=Math.max(0.004,scDist(b));
-    const blueHi=Math.min(8,d*0.22), blueLo=blueHi*0.45, maxS=Math.min(28,Math.max(0.35,d*0.55));
-    ship.speed+=(ship.throttle*maxS-ship.speed)*Math.min(1,dt*1.6);
-    const f=scFwd();sc.x+=f.x*ship.speed*dt;sc.y+=f.y*ship.speed*dt;sc.z+=f.z*ship.speed*dt;
-    ship.fuel=Math.max(0,ship.fuel-dt*0.04);
-    if(d<0.35&&b.kind==='star'){ship.hull-=18*dt;toast('Radiation warning. Turn away from the star.');}
-    sc._blue=ship.speed>=blueLo&&ship.speed<=blueHi;sc._range=d<(b.kind==='star'?40:b.kind==='station'?8:b.kind==='signal'?12:18);sc._aligned=scAlign(b)>0.9;
-    if(ship.fuel<=0){scDrop(true);return;}
-    if(sc._range&&ship.speed>blueHi*1.8&&scAlign(b)>0.75)scDrop(true);
-  }
-  function scProject(b){
-    const old={x:ship.x,y:ship.y,z:ship.z};ship.x=sc.x;ship.y=sc.y;ship.z=sc.z;let p=null;
-    try{p=worldPoint(b.x,b.y,b.z);}catch(e){p=null;}
-    ship.x=old.x;ship.y=old.y;ship.z=old.z;return p;
-  }
-  function drawSupercruise(){
-    ctx.fillStyle='#030713';ctx.fillRect(0,0,width,height);ctx.save();
-    for(let i=0;i<90;i++){
-      const a=(i*2.399)+ship.yaw, yy=((i%17)/17-.5)+ship.pitch*.15, streak=20+ship.speed*6;
-      const x=width*(0.5+Math.sin(a)*.42), y2=height*(0.48+yy*.7);
-      ctx.strokeStyle=i%5?'#9fd8ff22':'#ffe7b822';ctx.beginPath();ctx.moveTo(x,y2);ctx.lineTo(x-(x-width/2)*0.04*streak*0.02,y2+streak);ctx.stroke();
-    }
-    const drawn=scBodies().map(b=>({b,p:scProject(b),d:scDist(b)})).filter(o=>o.p&&o.p.z>0.2).sort((a,c)=>c.d-a.d);
-    for(const o of drawn){
-      const rad=Math.max(o.b.kind==='station'?3:2,(o.b.r*focal)/(o.p.z*8));
-      ctx.beginPath();ctx.fillStyle=o.b.color;ctx.arc(o.p.x,o.p.y,Math.min(rad,height*0.45),0,Math.PI*2);ctx.fill();
-      if(o.b.kind==='star'){ctx.strokeStyle='#ffefc088';ctx.lineWidth=6;ctx.stroke();}
-      if(o.b.id===sc.targetId){ctx.strokeStyle='#f0d48a';ctx.lineWidth=2;ctx.strokeRect(o.p.x-16,o.p.y-16,32,32);ctx.fillStyle='#f0d48a';ctx.font='12px system-ui';ctx.textAlign='center';ctx.fillText(o.b.name+' · '+fmtLs(o.d),o.p.x,o.p.y-22);}
-    }
-    ctx.fillStyle='#071018cc';ctx.fillRect(0,0,width,height*0.06);ctx.fillRect(0,height*0.93,width,height*0.07);
-    ctx.fillStyle='#c9fff2';ctx.textAlign='center';ctx.font='bold 14px system-ui';ctx.fillText('SUPERCRUISE',width/2,height*0.045);ctx.restore();
-  }
-  function drawOrbitHint(){
-    if(!sc.orbit||sc.active||state!=='flight')return;
-    ctx.save();ctx.globalAlpha=.85;ctx.fillStyle=currentSystem().color||'#7eb8d8';
-    ctx.beginPath();ctx.arc(width*0.72,height*0.34,Math.min(width,height)*0.22,0,Math.PI*2);ctx.fill();
-    ctx.globalAlpha=.35;ctx.fillStyle='#fff6d2';ctx.beginPath();ctx.arc(width*0.66,height*0.28,Math.min(width,height)*0.06,0,Math.PI*2);ctx.fill();ctx.restore();
-  }
-  const scUpdateBase=update;
-  update=function(dt){
-    if(state==='flight'&&(sc.charging>0||sc.active)){scStep(dt);if(ship.hull<=0){state='lost';releaseMouse();$('lostPanel')&&$('lostPanel').classList.remove('hidden');}return;}
-    const prev={x:ship.x,y:ship.y,z:ship.z};
-    scUpdateBase(dt);
-    if(!flightAssist&&state==='flight'&&!auto){
-      ship.x=prev.x;ship.y=prev.y;ship.z=prev.z;const f=scFwd();
-      const thrust=ship.fuel>0?ship.throttle*normalSpeed()*(boost>0?2.1:1):0;
-      faVel.x+=f.x*thrust*dt*0.85;faVel.y+=f.y*thrust*dt*0.85;faVel.z+=f.z*thrust*dt*0.85;
-      if(keys.has(' ')){faVel.x*=Math.max(0,1-dt*1.8);faVel.y*=Math.max(0,1-dt*1.8);faVel.z*=Math.max(0,1-dt*1.8);}
-      ship.x+=faVel.x*dt;ship.y+=faVel.y*dt;ship.z+=faVel.z*dt;ship.speed=Math.hypot(faVel.x,faVel.y,faVel.z);
-    } else if(flightAssist) faVel.x=faVel.y=faVel.z=0;
-  };
-  const scRenderBase=render;
-  render=function(){if(sc.active&&state==='flight'){drawSupercruise();return;}scRenderBase();drawOrbitHint();};
-  const scUiBase=updateUI;
-  updateUI=function(){
-    scUiBase();
-    if($('faBtn'))$('faBtn').textContent=flightAssist?'FA: ON':'FA: OFF';
-    if($('scBtn'))$('scBtn').textContent=sc.active?'Drop out':'Supercruise';
-    const panel=$('scNav');
-    if(panel){panel.style.display=sc.active?'block':'none';
-      if(sc.active){const list=$('scNavList');list.innerHTML=scBodies().map(b=>'<button data-id="'+b.id+'" style="display:block;width:100%;text-align:left;margin-top:6px;'+(b.id===sc.targetId?'border-color:#ffd88a':'')+'"><b>'+b.name+'</b><br>'+b.kind+' · '+fmtLs(scDist(b))+'</button>').join('');list.querySelectorAll('button').forEach(btn=>btn.onclick=()=>{sc.targetId=btn.dataset.id;updateUI();});}
-    }
-    if(sc.charging>0){$('assistState').textContent='FRAMESHIFT CHARGE '+sc.charging.toFixed(1)+'s';return;}
-    if(!flightAssist&&!sc.active)$('assistState').textContent=auto?'APPROACH ASSIST ACTIVE':'FLIGHT ASSIST OFF';
-    if(!sc.active)return;
-    const b=scBody(sc.targetId), d=scDist(b);
-    $('speed').textContent=(ship.speed*299792).toFixed(0);
-    $('assistState').textContent='SUPERCRUISE'+(sc._blue?' · BLUE ZONE':ship.throttle>0.75?' · TOO FAST':' · SET THROTTLE');
-    $('mission').textContent=currentSystem().name.toUpperCase()+' SUPERCRUISE';
-    $('objective').textContent=b.name+' · '+(sc._aligned?'ALIGNED':'TURN TO LOCK')+' · '+(sc._range?'IN DROP RANGE':'CLOSING');
-    $('range').textContent=fmtLs(d)+' · '+(ship.speed<0.01?'0':ship.speed.toFixed(2))+' ls/s';
-    $('bearing').textContent=b.kind.toUpperCase()+' LOCK';
-  };
-  function scToggleFA(){
-    flightAssist=!flightAssist;
-    faVel.x=Math.sin(ship.yaw)*Math.cos(ship.pitch)*ship.speed;faVel.y=Math.sin(ship.pitch)*ship.speed;faVel.z=Math.cos(ship.yaw)*Math.cos(ship.pitch)*ship.speed;
-    try{localStorage.setItem('spacegods-fa',flightAssist?'1':'0');}catch(e){}
-    toast(flightAssist?'Flight assist on. Velocity follows the nose.':'Flight assist off. The ship keeps its momentum.');
-  }
-  const tools=document.querySelector('.flighttools');
-  if(tools&&!$('scBtn')){
-    const n=document.createElement('button');n.id='navLock';n.textContent='Nav lock';n.title='Cycle supercruise destination';n.onclick=()=>scCycle(1);tools.prepend(n);
-    const f=document.createElement('button');f.id='faBtn';f.textContent=flightAssist?'FA: ON':'FA: OFF';f.title='Flight assist · N';f.onclick=scToggleFA;tools.prepend(f);
-    const b=document.createElement('button');b.id='scBtn';b.textContent='Supercruise';b.title='Frameshift supercruise · G';b.onclick=scEngage;tools.prepend(b);
-  }
-  const panel=document.createElement('div');panel.id='scNav';
-  panel.style.cssText='position:absolute;left:16px;top:150px;z-index:5;display:none;pointer-events:auto;background:#071422e6;border:1px solid #6ecfc8;border-radius:12px;padding:10px;width:min(240px,70vw);font-size:12px';
-  panel.innerHTML='<b style="color:#ffd88a">SYSTEM NAV</b><div id="scNavList"></div><p class="small">G supercruise / drop · N flight assist · [ ] cycle lock. Blue zone and alignment required for a safe drop.</p>';
-  $('hud')&&$('hud').appendChild(panel);
-  addEventListener('keydown',e=>{
-    if(e.repeat||e.metaKey||e.ctrlKey||e.altKey)return;
-    const tag=document.activeElement&&document.activeElement.tagName;
-    if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT')return;
-    if(e.key==='g'||e.key==='G'){e.preventDefault();scEngage();}
-    if(e.key==='n'||e.key==='N'){e.preventDefault();scToggleFA();}
-    if(e.key==='[')scCycle(-1);
-    if(e.key===']')scCycle(1);
-  });
-  const scNavBase=openNav;openNav=function(){if(sc.active||sc.charging>0){toast('Drop from supercruise before a hyperspace jump.');return;}return scNavBase();};
-  const scArriveBase=arrive;arrive=function(){sc.active=false;sc.charging=0;sc.orbit=null;return scArriveBase();};
-  const scDepartBase=depart;depart=function(){sc.active=false;sc.charging=0;sc.orbit=null;faVel.x=faVel.y=faVel.z=0;return scDepartBase();};
-  if(window.flightCheckpoints&&window.flightCheckpoints.capture){
-    const cap=window.flightCheckpoints.capture, res=window.flightCheckpoints.restore;
-    window.flightCheckpoints.capture=function(){const q=cap();q.supercruise={active:sc.active,x:sc.x,y:sc.y,z:sc.z,targetId:sc.targetId,fa:flightAssist,orbit:sc.orbit};return q;};
-    window.flightCheckpoints.restore=function(q){const ok=res(q);if(q&&q.supercruise){sc.active=!!q.supercruise.active&&state==='flight';sc.x=q.supercruise.x||sc.x;sc.y=q.supercruise.y||sc.y;sc.z=q.supercruise.z||sc.z;sc.targetId=q.supercruise.targetId||'station';sc.orbit=q.supercruise.orbit||null;flightAssist=q.supercruise.fa!==false;}return ok;};
-  }
-  window.supercruise={engage:scEngage,drop:()=>scDrop(false),cycle:scCycle,toggleFA:scToggleFA,get active(){return sc.active},get target(){return sc.targetId}};
-}
-
+// Persistent operations and station economies.
+function operationWorldInit(){if(!save.operationWorld)save.operationWorld={clock:0,bases:systems.map((s,i)=>({security:45+i*4,supply:65-i*3,completed:0})),chain:null,history:[]};return save.operationWorld;}
+const storyDefs=[{name:'The stolen relief fleet',origin:1,hunt:3,relief:5,brief:'Trace a stolen manifest at Moon Base, pursue its escorts to Dusk, recover supplies and choose their recipient.'},{name:'Aster black-box conspiracy',origin:6,hunt:3,relief:0,brief:'Scan a lost beacon at Aster, break a Dusk patrol, recover evidence and choose justice or frontier relief.'},{name:'Haven missing convoy',origin:5,hunt:6,relief:1,brief:'Decode Haven’s distress signal, hunt the thieves at Aster and recover the convoy cargo.'}];
+const storyJobStart=combatJobs.length;storyDefs.forEach(d=>combatJobs.push({journalOnly:true,name:d.name+' · interception',brief:'Recover three crates after the first patrol; defeat the responding command ship.',waves:[3,2,3,1],rank:2,boss:true,lootGoal:3,reward:22000,dest:d.hunt}));
+let journalReturn='flight';const operationJournal=document.createElement('div');operationJournal.id='operationJournal';operationJournal.className='overlay hidden';operationJournal.innerHTML='<div class="panel" style="width:min(860px,96vw);max-height:90dvh;overflow:auto"><h2>Operations journal</h2><div id="journalActive"></div><div class="row"><button id="journalTrack">Track objective</button><button id="journalNavigate">Automate travel</button></div><h3>Branching expeditions</h3><div id="journalOffers"></div><h3>Station conditions</h3><div id="journalBases"></div><h3>Recent settlements</h3><div id="journalHistory"></div><button id="journalClose" style="position:sticky;bottom:0">Return to game</button></div>';document.body.appendChild(operationJournal);
+const journalStyle=document.createElement('style');journalStyle.textContent='#operationJournal{z-index:110}#operationJournal .commandcard{margin:10px 0;padding:14px;border:1px solid #386173;border-radius:12px;background:#081c2b}#journalBases{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}#journalBases progress{width:100%;accent-color:#7ee7bf}';document.head.appendChild(journalStyle);
+const journalButton=document.createElement('button');journalButton.textContent='Mission journal';journalButton.id='missionJournalButton';$('view').after(journalButton);const journalDockButton=document.createElement('button');journalDockButton.textContent='Journal & expeditions';$('depart').after(journalDockButton);
+function chainDestination(){const c=operationWorldInit().chain;if(!c)return save.contract?.ready?(save.contract.dest??save.system):(save.contract?.dest??save.system);const d=storyDefs[c.id];return c.stage==='scan'?d.origin:c.stage==='hunt'?d.hunt:c.stage==='delivery'?c.recipient:save.system;}
+function chainText(){const c=operationWorldInit().chain;if(!c)return '';const d=storyDefs[c.id];return c.stage==='scan'?'Fly to '+systems[d.origin].station+' and scan the survey beacon within 350 m below 60 m/s.':c.stage==='pursuit'?'Manifest decoded. Choose an interception route in the journal.':c.stage==='hunt'?'Travel to '+systems[d.hunt].station+'. '+(stagedPhaseText()||'Defeat the patrols and recover cargo.') :c.stage==='recipient'?'Cargo secured. Choose a delivery recipient in the journal.':'Deliver recovered cargo: dock at '+systems[c.recipient].station+' and claim payment.';}
+function journalUI(){const w=operationWorldInit(),c=w.chain,m=save.contract;let text=c?storyDefs[c.id].name+'<p>'+chainText()+'</p>':m?(m.pilotTitle||contractNames[m.type]||'Operation')+'<p>'+m.progress+'/'+m.goal+' · '+m.reward+' cr · '+(m.ready?'Ready to settle':'In progress')+'</p>':'No active mission. Accept an expedition here while docked, or use the existing mission boards.';if(c?.stage==='pursuit')text+='<button id="storySafe">Trace quietly · 4 waves</button> <button id="storyRisk">Direct assault · 6 waves · +8,000 cr</button>';if(c?.stage==='recipient')text+='<button id="storyJustice">Deliver to command · 30,000 cr · security +18</button> <button id="storyRelief">Deliver to relief base · 26,000 cr · supplies +25</button>';$('journalActive').innerHTML='<article class="commandcard">'+text+'</article>';$('journalTrack').disabled=!m;$('journalNavigate').disabled=!m||!!c&&['pursuit','recipient'].includes(c.stage);$('journalOffers').innerHTML=storyDefs.map((d,i)=>'<article class="commandcard"><b>'+d.name+'</b><p>'+d.brief+'</p><button id="storyAccept'+i+'" '+(m||journalReturn!=='dock'?'disabled':'')+'>Accept expedition</button></article>').join('');storyDefs.forEach((d,i)=>$('storyAccept'+i).onclick=()=>startStory(i));if(c?.stage==='pursuit'){$('storySafe').onclick=()=>choosePursuit(false);$('storyRisk').onclick=()=>choosePursuit(true);}if(c?.stage==='recipient'){$('storyJustice').onclick=()=>chooseRecipient(false);$('storyRelief').onclick=()=>chooseRecipient(true);}$('journalBases').innerHTML=w.bases.map((b,i)=>'<article class="commandcard"><b>'+systems[i].station+'</b><p>Security '+Math.round(b.security)+'% · Supplies '+Math.round(b.supply)+'%</p><progress value="'+b.security+'" max="100"></progress><p>'+b.completed+' completed jobs · '+(b.security<45?'Trade under threat':b.supply<45?'Supply shortage':'Trade lanes stable')+'</p></article>').join('');$('journalHistory').textContent=w.history.join(' · ')||'Your completed missions will be recorded here.';}
+function openJournal(){if(!['flight','dock'].includes(state))return;journalReturn=state;releaseMouse();keys.clear();state='operationjournal';operationJournal.classList.remove('hidden');journalUI();}
+function closeJournal(){if(state!=='operationjournal')return;state=journalReturn;operationJournal.classList.add('hidden');updateUI();}
+journalButton.onclick=journalDockButton.onclick=openJournal;$('journalClose').onclick=closeJournal;
+function startStory(i){if(state!=='operationjournal'||journalReturn!=='dock'||save.contract||!storyDefs[i])return;const d=storyDefs[i];operationWorldInit().chain={id:i,stage:'scan',risk:false,recipient:null};save.contract={type:'survey',source:save.system,dest:d.origin,progress:0,goal:1,reward:30000,ready:false,pilotTitle:d.name};surveyProgress=0;persist();saveCheckpoint('auto',true);journalUI();}
+function choosePursuit(risk){const c=operationWorldInit().chain;if(!c||c.stage!=='pursuit')return;c.risk=risk;c.stage='hunt';const d=storyDefs[c.id],j=combatJobs[storyJobStart+c.id];j.waves=risk?[3,3,2,3,3,1]:[3,2,3,1];combatOperation={job:storyJobStart+c.id,system:d.hunt,wave:0,kills:0,pending:true,delay:0,stage:'hunt',recovered:0,recoveryIds:[]};save.contract={type:'bounty',source:d.origin,dest:d.hunt,progress:0,goal:j.waves.reduce((a,b)=>a+b,0),reward:risk?38000:30000,ready:false,combatJob:storyJobStart+c.id,pilotTitle:d.name};pirates.length=0;bolts.length=0;persist();saveCheckpoint('auto',true);journalUI();}
+function chooseRecipient(relief){const c=operationWorldInit().chain;if(!c||c.stage!=='recipient')return;c.recipient=relief?storyDefs[c.id].relief:0;c.relief=relief;c.stage='delivery';combatOperation=null;save.contract={type:'delivery',source:save.system,dest:c.recipient,progress:0,goal:1,reward:(relief?26000:30000)+(c.risk?8000:0),ready:false,pilotTitle:storyDefs[c.id].name};pirates.length=0;auto=false;missionAssist=false;persist();saveCheckpoint('auto',true);journalUI();}
+const storyEvent=missionEvent;missionEvent=function(type,n=1){const c=operationWorldInit().chain;if(c?.stage==='scan'){if(type!=='survey'||save.system!==storyDefs[c.id].origin)return;save.contract.progress=1;c.stage='pursuit';if(missionAssist)stopMissionAssist();radio('Manifest decoded. Open Mission journal to choose the pursuit.');saveCheckpoint('auto',true);return;}if(c&&['pursuit','recipient'].includes(c.stage))return;storyEvent(type,n);if(c?.stage==='hunt'&&save.contract?.ready){c.stage='recipient';save.contract.ready=false;if(missionAssist)stopMissionAssist();combatOperation=null;radio('Cargo secured. Choose a recipient in Mission journal.');saveCheckpoint('auto',true);}};
+const worldClaim=claimContract;claimContract=function(){if(state!=='dock'||!save.contract?.ready)return;const w=operationWorldInit(),c=w.chain,m={...save.contract};if(c&&(c.stage!=='delivery'||save.system!==c.recipient)){toast('Deliver to the chosen station before settlement.');return;}const before=save.completed;worldClaim();if(save.completed>before){const sector=c?c.recipient:(m.dest??save.system),b=w.bases[sector];b.security=clamp(b.security+(c&&!c.relief?18:m.type==='bounty'?10:3),0,100);b.supply=clamp(b.supply+(c&&c.relief?25:m.type==='delivery'||m.type==='mining'?12:4),0,100);b.completed++;w.history.unshift((c?storyDefs[c.id].name:m.pilotTitle||contractNames[m.type])+' · '+systems[sector].station+' · '+m.reward+' cr');w.history=w.history.slice(0,12);w.chain=null;persist();saveCheckpoint('auto',true);}};$('claimContract').onclick=()=>claimContract();
+const worldAbandon=abandonContract;abandonContract=function(){const m=save.contract;worldAbandon();if(m&&!save.contract){const w=operationWorldInit(),b=w.bases[m.dest??save.system];b.security=Math.max(0,b.security-5);w.chain=null;combatOperation=null;persist();saveCheckpoint('auto',true);}};$('abandonContract').onclick=()=>abandonContract();
+$('journalTrack').onclick=()=>{closeJournal();const c=operationWorldInit().chain;if(state!=='flight'){toast('Launch to track this objective.');return;}if(c&&['pursuit','recipient'].includes(c.stage)){openJournal();return;}if(chainDestination()!==save.system){openNav();chooseSpaceStation(chainDestination());return;}if(c?.stage==='scan'){target='survey';auto=false;}else if(save.contract?.ready||c?.stage==='delivery'){target='station';stationRoute();}else if(combatOperation?.stage==='recover')targetSalvage();else if(combatOperation)targetPirate();else{target=save.contract?.type==='survey'?'survey':save.contract?.type==='rescue'?'pod':'station';}updateUI();};$('journalNavigate').onclick=()=>{const dest=chainDestination();closeJournal();beginVoyage(dest,true);};
+const worldUpdate=update;update=function(dt){worldUpdate(dt);const w=operationWorldInit();if(!['flight','dock'].includes(state))return;w.clock+=dt;if(w.clock>=180){w.clock-=180;w.bases.forEach(b=>{b.security=Math.max(20,b.security-1);b.supply=Math.max(20,b.supply-1);});}const c=w.chain;if(c?.stage==='delivery'&&state==='dock'&&save.system===c.recipient&&!save.contract.ready){save.contract.ready=true;save.contract.progress=1;missionUI();saveCheckpoint('auto',true);}};
+const worldHUD=updateUI;updateUI=function(){worldHUD();if(operationWorldInit().chain){$('objective').textContent=chainText();$('mission').textContent=storyDefs[operationWorldInit().chain.id].name;}};
+const worldStable=stableFlightState;stableFlightState=function(){return state==='operationjournal'?journalReturn:worldStable();};const worldRestore=restoreFlight;restoreFlight=function(q){operationJournal.classList.add('hidden');if(q?.save?.operationWorld?.chain){const c=q.save.operationWorld.chain;if(storyDefs[c.id])combatJobs[storyJobStart+c.id].waves=c.risk?[3,3,2,3,3,1]:[3,2,3,1];}const ok=worldRestore(q);if(ok)operationWorldInit();return ok;};window.flightCheckpoints.restore=q=>restoreFlight(q);
+const worldTraffic=render;render=function(){worldTraffic();if(state!=='flight')return;const b=operationWorldInit().bases[save.system];for(let i=0;i<Math.floor(b.supply/25);i++)npcShip({x:station.x+2200+i*320,y:station.y+260+i*60,z:station.z-1400+(time*18+i*390)%2400,yaw:0,pitch:0,color:b.security<45?'#ca9d69':'#79c9bd',name:'SUPPLY FREIGHTER'});};
+window.operationStories={open:openJournal,accept:startStory,pursuit:choosePursuit,recipient:chooseRecipient,get world(){return JSON.parse(JSON.stringify(operationWorldInit()));}};
+operationWorldInit();
 
 requestAnimationFrame(tick);
 })();
@@ -1848,32 +1671,5 @@ body.cartoon progress{accent-color:#7ef0c8;border:2px solid #071018;border-radiu
   if (document.getElementById("hud")) mountToggle();
   else document.addEventListener("DOMContentLoaded", mountToggle);
 })();
-</script>
-
-
-
-<script>
-// RIFT VISUAL EXPANSION — bounded procedural scenery, no network assets.
-(()=>{
-let quality='medium';try{quality=localStorage.getItem('sg-rift-quality')||quality}catch(e){}if(!['low','medium','high'].includes(quality))quality='medium';
-const counts=()=>quality==='low'?12:quality==='high'?48:28;
-const neb=document.createElement('canvas');neb.width=1024;neb.height=512;const ng=neb.getContext('2d');
-for(let i=0;i<24;i++){const x=(i*179)%1024,y=256+Math.sin(i*1.71)*150,r=100+i%5*23,g=ng.createRadialGradient(x,y,0,x,y,r);g.addColorStop(0,i%2?'#5f2fae50':'#167c9c50');g.addColorStop(.5,'#293f7325');g.addColorStop(1,'#00000000');ng.fillStyle=g;ng.fillRect(x-r,y-r,r*2,r*2)}
-const settings=document.createElement('label');settings.style.cssText='display:flex;align-items:center;gap:8px;margin:10px 0;color:#aeeaff';settings.innerHTML='Rift graphics <select aria-label="Graphics quality"><option value="low">Low · phone</option><option value="medium">Medium</option><option value="high">High</option></select>';const select=settings.querySelector('select');select.value=quality;select.onchange=()=>{quality=select.value;try{localStorage.setItem('sg-rift-quality',quality)}catch(e){}};document.querySelector('#pausePanel .panel').append(settings);
-const oldBg=bg;bg=function(){oldBg();ctx.save();ctx.globalCompositeOperation='screen';const drift=Math.sin(ship.yaw)*width*.18;ctx.globalAlpha=quality==='low'?.45:.8;ctx.drawImage(neb,-width*.2+drift,-height*.15,width*1.4,height*.9);ctx.restore();riftSky();};
-function riftSky(){const p=project(camera(-.58,.2,.8,true));if(!p)return;const r=Math.min(width,height)*.12;ctx.save();ctx.translate(p.x,p.y);ctx.rotate(-.35+Math.sin(time*.12)*.03);ctx.scale(.28,1);ctx.lineWidth=2;ctx.strokeStyle='#a97bff';ctx.shadowColor='#845cff';ctx.shadowBlur=quality==='low'?0:16;for(let j=0;j<3;j++){ctx.beginPath();for(let i=0;i<=48;i++){const a=i/48*Math.PI*2,k=r*(1+Math.sin(a*7+time*.7+j)*.05+j*.075);const x=Math.cos(a)*k,y=Math.sin(a)*k;i?ctx.lineTo(x,y):ctx.moveTo(x,y)}ctx.closePath();ctx.stroke()}ctx.fillStyle='#040516';ctx.beginPath();ctx.ellipse(0,0,r*.85,r*.85,0,0,Math.PI*2);ctx.fill();ctx.restore();}
-const oldPlanet=planet;planet=function(){oldPlanet();const p=worldPoint(-3600,1700,12000);if(!p)return;const r=Math.min(800,900*focal/p.z);if(r<2)return;ctx.save();const g=ctx.createRadialGradient(p.x-r*.4,p.y-r*.4,0,p.x,p.y,r);g.addColorStop(0,'#b1acc0');g.addColorStop(.55,'#4a3c65');g.addColorStop(1,'#0a1024');ellipse(p.x,p.y,r,r,g);ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.clip();for(let j=0;j<5;j++){ctx.beginPath();ctx.moveTo(p.x-r,p.y-r+j*r*.43);for(let k=0;k<10;k++)ctx.lineTo(p.x-r+k*r*.23,p.y-r+j*r*.43+Math.sin(k*2+j)*r*.12);ctx.strokeStyle='#9f78e5';ctx.lineWidth=Math.max(1,r*.009);ctx.stroke()}ctx.restore();};
-function box(x,y,z,w,h,d){worldPolygon([[x-w,y,z-d],[x+w,y,z-d],[x+w,y+h,z-d],[x-w,y+h,z-d]],'#192e45','#6499b4');worldPolygon([[x+w,y,z-d],[x+w,y,z+d],[x+w,y+h,z+d],[x+w,y+h,z-d]],'#0b182c','#355b77');worldPolygon([[x-w,y+h,z-d],[x+w,y+h,z-d],[x+w,y+h,z+d],[x-w,y+h,z+d]],'#34556c','#77b8cd');for(let a=0;a<4;a++)for(let b=0;b<3;b++){const p=worldPoint(x-w*.7+b*w*.7,y+h*(a+1)/5,z-d-1);if(p&&p.z>20){ctx.fillStyle=(a+b)%3?'#7adce8':'#ffd694';ctx.fillRect(p.x,p.y,clamp(3*focal/p.z,1,4),clamp(2*focal/p.z,1,3))}}}
-const oldStation=stationDraw;stationDraw=function(){ctx.save();const sx=station.x,sy=station.y,sz=station.z;worldPolygon([[sx+500,sy-280,sz-200],[sx+1700,sy-280,sz-200],[sx+1700,sy-280,sz+1100],[sx+500,sy-280,sz+1100]],'#0d2339','#49768c');for(let i=0;i<(quality==='low'?8:18);i++){const x=sx+650+i%6*170,z=sz+Math.floor(i/6)*350;box(x,sy-280,z,48,100+(i*47)%260,65);if(i%4===0){segment([x,sy-280,z],[x,sy+140,z],'#d1a363',2);const swing=Math.sin(time*.15+i)*60;segment([x-90,sy+140,z],[x+100,sy+140,z+swing],'#ffc872',2);segment([x+100,sy+140,z+swing],[x+100,sy+35+Math.sin(time*.5+i)*22,z+swing],'#83c9d2')}}ctx.restore();oldStation();};
-const oldNpc=npcShip;npcShip=function(n,...args){ctx.save();if(state==='flight'){const a=worldPoint(n.x,n.y,n.z),b=worldPoint(n.x-Math.sin(n.yaw||0)*85,n.y,n.z-Math.cos(n.yaw||0)*85);if(a&&b&&a.z>20&&b.z>20)line(a.x,a.y,b.x,b.y,args[0]?'#ff805a80':'#74dfff70',clamp(8*focal/a.z,1,5))}ctx.restore();oldNpc(n,...args);};
-const oldCockpit=cockpit;cockpit=function(){oldCockpit();ctx.save();const y=height*.93,r=Math.min(27,width*.038);for(let i=0;i<3;i++){const x=width*.5+(i-1)*r*3.1,value=clamp((i===0?ship.fuel:i===1?ship.hull:ship.speed/normalSpeed()*100)/100,0,1);ellipse(x,y,r,r,'#051220','#306178');ctx.strokeStyle=['#64e2ff','#a1f6bd','#b99aff'][i];ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,y,r*.78,-Math.PI*.8,-Math.PI*.8+value*Math.PI*1.6);ctx.stroke();ctx.fillStyle='#c8f1ff';ctx.font=Math.max(8,r*.38)+'px monospace';ctx.textAlign='center';ctx.fillText(['FUEL','HULL','VEL'][i],x,y+3)}ctx.restore();};
-const riftCombatBase=combatEffects;combatEffects=function(){riftCombatBase();ctx.save();ctx.globalCompositeOperation='screen';for(const b of bursts){const p=worldPoint(b.x,b.y,b.z);if(!p||p.z<5)continue;const r=clamp(70*focal/p.z,5,130),g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,r);g.addColorStop(0,'#fff5c9cc');g.addColorStop(.22,'#ffb56a99');g.addColorStop(1,'#a547ff00');ctx.globalAlpha=clamp(b.life*3,0,1);ctx.fillStyle=g;ctx.fillRect(p.x-r,p.y-r,r*2,r*2)}ctx.restore();};
-let lastHull=ship.hull,shieldPulse=0;
-const oldRender=render;render=function(){oldRender();if(!['flight','jump','landing','liftoff'].includes(state))return;ctx.save();if(state==='flight'&&window.supercruise&&window.supercruise.active){ctx.globalCompositeOperation='screen';ctx.globalAlpha=.35;ctx.drawImage(neb,-width*.1,-height*.1,width*1.2,height*.85);ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';riftSky()}if(ship.hull<lastHull)shieldPulse=time+.7;lastHull=ship.hull;if(time<shieldPulse){const a=(shieldPulse-time)/.7,g=ctx.createRadialGradient(width/2,height*.46,Math.min(width,height)*.2,width/2,height*.46,Math.max(width,height)*.7);g.addColorStop(0,'#38caff00');g.addColorStop(1,'#38caff70');ctx.globalAlpha=a;ctx.fillStyle=g;ctx.fillRect(0,0,width,height);ctx.globalAlpha=1;ctx.strokeStyle='#91e4ff';ctx.beginPath();ctx.ellipse(width/2,height*.46,width*(.3+(1-a)*.3),height*(.25+(1-a)*.3),0,0,Math.PI*2);ctx.stroke()}
-if(state==='jump'){const cx=width/2,cy=height*.46;ctx.globalCompositeOperation='screen';for(let i=0;i<counts();i++){const phase=((i/counts()+time*.45)%1),r=15+phase*phase*Math.max(width,height);ctx.strokeStyle=i%2?'#aa74ff66':'#4ee6ff66';ctx.lineWidth=1+phase*4;ctx.beginPath();ctx.ellipse(cx,cy,r,r*.68,Math.sin(time*.2)*.1,0,Math.PI*2);ctx.stroke()}}
-if(state==='flight'&&!(window.supercruise&&window.supercruise.active)){for(let i=0;i<counts();i++){const x=ship.x+Math.sin(i*7.17)*2200,y=ship.y+Math.cos(i*4.3)*1600,z=ship.z+((i*179-time*ship.speed*.2)%3200+3200)%3200+100,p=worldPoint(x,y,z);if(p){ctx.fillStyle=i%3?'#82b9d855':'#bba3ef77';const s=clamp(7*focal/p.z,1,5);ctx.fillRect(p.x,p.y,s,s)}}}
-ctx.restore();};
-})();
-
 </script>
 </body></html>
