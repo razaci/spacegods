@@ -31,6 +31,68 @@
 #freshSW .construct{font-size:17px;background:#0b3a4e}#freshSWMsg{min-height:25px;margin-top:10px;color:#8fffd1;font-weight:800}
 #freshSWAccess{position:fixed;right:12px;bottom:82px;z-index:5000;width:auto!important;padding:10px 14px!important;border:1px solid #49a9c8!important;border-radius:9px!important;background:#072334!important;color:#eaffff!important;font-weight:900!important}
 </style>
+
+<style id="double-game-size-pass">
+/* DOUBLE-SIZE GAMEPLAY PASS — presentation only; flight/mission logic untouched */
+html,body{width:100%;min-height:100%;margin:0}
+body{overflow-x:hidden}
+
+/* The world canvas is the game. Give it a much larger visible stage. */
+#world{
+  width:100vw !important;
+  height:min(92vh,1400px) !important;
+  min-height:720px !important;
+  display:block !important;
+}
+
+/* Keep the main game shell wide instead of constraining the enlarged canvas. */
+#game,#app,.game,.game-shell,.wrap,.shell,.stage,.viewport{
+  max-width:none !important;
+}
+
+/* HUD remains readable rather than being blindly doubled. */
+#hud{font-size:clamp(13px,1.05vw,18px)}
+
+/* Shipworks remains usable over the larger game. */
+#freshSW{max-height:94vh;overflow:auto}
+
+/* Smaller screens still get the largest practical play area. */
+@media(max-width:900px){
+  #world{height:82vh !important;min-height:560px !important}
+}
+@media(max-width:560px){
+  #world{height:76vh !important;min-height:480px !important}
+}
+</style>
+
+
+<style id="buried-system-controls-style">
+#sgBuriedSystems{
+ display:inline-flex;
+ flex-wrap:wrap;
+ gap:5px;
+ align-items:center;
+ margin-left:6px;
+ vertical-align:middle;
+}
+#sgBuriedSystems button{
+ position:static !important;
+ inset:auto !important;
+ transform:none !important;
+ width:auto !important;
+ min-width:0 !important;
+ min-height:28px !important;
+ margin:0 !important;
+ padding:5px 8px !important;
+ border-radius:5px !important;
+ font-size:10px !important;
+ line-height:1.05 !important;
+ letter-spacing:.045em !important;
+ opacity:.88 !important;
+ box-shadow:none !important;
+}
+#sgBuriedSystems button:hover{opacity:1 !important}
+</style>
 </head><body>
 <canvas id="world" aria-label="First person view from a spacecraft cockpit"></canvas>
 <div id="hud"><div class="top"><span class="brand">SPACE GODS <span style="color:#5d8399">/ AURORA FLIGHT SYSTEMS</span></span><div class="tools"><button id="view" title="Switch cockpit / chase camera · V">Outside view</button><button id="openDocking" title="Docking request and landing commands">Dock</button><button id="mouse" title="Capture mouse for steering · M">Mouse</button><button id="sound">Sound off</button><button id="pause">Pause</button></div></div>
@@ -1928,6 +1990,177 @@ addEventListener('pointerdown',()=>{const h=document.getElementById('mouseHint')
  draw();renderHangar();
 })();
 </script>
+
+
+
+<script id="bury-system-controls-script">
+(()=>{
+ function byText(txt){
+   txt=txt.toUpperCase();
+   return [...document.querySelectorAll('button')].find(b=>(b.textContent||'').trim().toUpperCase().includes(txt));
+ }
+ function bury(){
+   if(document.getElementById('sgBuriedSystems'))return;
+   const ink=byText('INK ON')||byText('INK');
+   if(!ink)return setTimeout(bury,300);
+   const city=byText('CITY SIMULATION');
+   const academy=byText('PILOT ACADEMY');
+   const ship=document.getElementById('freshSWAccess')||byText('GODS SHIPWORKS');
+   const host=ink.parentElement;
+   if(!host)return;
+   const box=document.createElement('span');
+   box.id='sgBuriedSystems';
+   box.setAttribute('aria-label','Additional systems');
+   ink.insertAdjacentElement('afterend',box);
+   for(const [b,label] of [[city,'CITY SIM'],[academy,'ACADEMY'],[ship,'SHIPWORKS']]){
+     if(!b)continue;
+     b.textContent=label;
+     b.removeAttribute('style');
+     box.appendChild(b);
+   }
+ }
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bury,{once:true});else bury();
+ setTimeout(bury,350);
+})();
+</script>
+
+<script id="space-gods-runtime-enhancement">
+(()=>{
+ 'use strict';
+ if(window.__SG_RUNTIME_ENHANCED__)return;
+ window.__SG_RUNTIME_ENHANCED__=true;
+
+ const RT={
+   visible:!document.hidden,
+   errors:[],
+   frames:0,
+   fps:60,
+   lastFps:performance.now(),
+   lastFrame:performance.now(),
+   storageDirty:false,
+   lastSave:0,
+   uiLast:0,
+   quality:'high'
+ };
+ window.SpaceGodsRuntime=RT;
+
+ // Prevent optional UI/audio errors from becoming a cascade of repeated failures.
+ addEventListener('error',e=>{
+   try{
+     const m=String(e.message||'runtime error').slice(0,160);
+     if(!RT.errors.includes(m)){RT.errors.unshift(m);RT.errors=RT.errors.slice(0,8)}
+   }catch(_){}
+ },true);
+ addEventListener('unhandledrejection',e=>{
+   try{
+     const m=String(e.reason?.message||e.reason||'promise error').slice(0,160);
+     if(!RT.errors.includes(m)){RT.errors.unshift(m);RT.errors=RT.errors.slice(0,8)}
+   }catch(_){}
+ });
+
+ // Background tabs should not keep hammering decorative timers.
+ document.addEventListener('visibilitychange',()=>{
+   RT.visible=!document.hidden;
+   RT.lastFrame=performance.now();
+ });
+
+ // A compact safe storage helper for NEW runtime data only.
+ RT.store=(key,value)=>{
+   try{
+     const raw=JSON.stringify(value);
+     if(raw.length>180000)return false;
+     localStorage.setItem(key,raw);
+     return true;
+   }catch(e){
+     try{sessionStorage.setItem(key,JSON.stringify(value));return true}catch(_){return false}
+   }
+ };
+ RT.read=(key,fallback=null)=>{
+   try{
+     const raw=localStorage.getItem(key)??sessionStorage.getItem(key);
+     return raw==null?fallback:JSON.parse(raw);
+   }catch(e){return fallback}
+ };
+
+ // Debouncer/throttler for future systems so menus don't rebuild every animation frame.
+ RT.throttle=(fn,ms=100)=>{
+   let last=0,pending=0,args;
+   return function(...a){
+     args=a;const now=performance.now(),wait=ms-(now-last);
+     if(wait<=0){last=now;fn.apply(this,args)}
+     else if(!pending)pending=setTimeout(()=>{pending=0;last=performance.now();fn.apply(this,args)},wait);
+   };
+ };
+ RT.debounce=(fn,ms=160)=>{
+   let t=0;
+   return function(...a){clearTimeout(t);t=setTimeout(()=>fn.apply(this,a),ms)}
+ };
+
+ // Adaptive quality signal. Existing renderer is left untouched; new effects can consult this.
+ function perfTick(now){
+   RT.frames++;
+   const elapsed=now-RT.lastFps;
+   if(elapsed>=1000){
+     RT.fps=Math.round(RT.frames*1000/elapsed);
+     RT.frames=0;RT.lastFps=now;
+     RT.quality=RT.fps<34?'low':RT.fps<50?'medium':'high';
+   }
+   requestAnimationFrame(perfTick);
+ }
+ requestAnimationFrame(perfTick);
+
+ // Shared bounded particle/effect pool for additions made after this pass.
+ RT.effects=[];
+ RT.spawnEffect=(effect)=>{
+   if(!effect||typeof effect!=='object')return;
+   const cap=RT.quality==='low'?50:RT.quality==='medium'?90:140;
+   if(RT.effects.length>=cap)RT.effects.splice(0,RT.effects.length-cap+1);
+   RT.effects.push({...effect,born:performance.now()});
+ };
+ RT.pruneEffects=(maxAge=5000)=>{
+   const n=performance.now();
+   RT.effects=RT.effects.filter(x=>n-(x.born||n)<maxAge);
+ };
+
+ // Avoid accidental double-click construction/launch spam without blocking normal clicks.
+ document.addEventListener('click',e=>{
+   const b=e.target.closest?.('button');
+   if(!b||b.dataset.sgBusy==='1')return;
+   if(/construct|launch|depart|jump|dock/i.test((b.id||'')+' '+(b.textContent||''))){
+     b.dataset.sgBusy='1';
+     setTimeout(()=>{try{delete b.dataset.sgBusy}catch(_){}},280);
+   }
+ },true);
+
+ // Keyboard state cleanup prevents a stuck-throttle/stuck-turn key after focus loss.
+ addEventListener('blur',()=>{
+   try{if(window.cleanMissionFlight?.state?.held)window.cleanMissionFlight.state.held.clear()}catch(e){}
+ });
+
+ // Low-frequency housekeeping only. No expensive DOM rebuild loop.
+ setInterval(()=>{
+   if(!RT.visible)return;
+   RT.pruneEffects();
+   try{
+     const sw=document.getElementById('freshSW');
+     if(sw?.classList.contains('on')){
+       // Keep malformed scroll positions from leaving the yard apparently blank.
+       if(!Number.isFinite(sw.scrollTop))sw.scrollTop=0;
+     }
+   }catch(e){}
+ },2000);
+
+ // Tiny diagnostics API; no permanent screen clutter.
+ RT.status=()=>({
+   fps:RT.fps,
+   quality:RT.quality,
+   visible:RT.visible,
+   recentErrors:[...RT.errors],
+   effects:RT.effects.length
+ });
+})();
+</script>
+
 <script id="clean-mission-compatible-flight">
 (()=>{
  const P={active:false,last:performance.now(),held:new Set(),drag:null};
