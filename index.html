@@ -1191,6 +1191,27 @@ function openFlightControls(){if(state==='menu'||state==='lost')return;controlsR
 controlButton.onclick=dockControlButton.onclick=openFlightControls;$('flightControlClose').onclick=()=>{state=controlsReturn;controlPanel.classList.add('hidden');updateUI()};$('flightSaveNow').onclick=()=>{saveCheckpoint('auto');controlUI()};$('flightLoadAuto').onclick=()=>loadCheckpoint('auto');$('flightSensitivity').oninput=e=>sensitivity=Number(e.target.value);$('flightCamera').onclick=()=>{view=view==='cockpit'?'chase':'cockpit';controlUI()};$('flightStop').onclick=()=>{setThrottle(0);ship.speed=0;boost=0;controlUI()};$('flightManual').onclick=()=>{voyage=null;missionAssist=null;auto=false;dockingGuidance=false;cruise=false;controlUI()};$('flightSound').onclick=sound;$('flightFull').onclick=fullscreen;
 $('flightExport').onclick=()=>{const blob=new Blob([JSON.stringify(captureFlight())],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='space-gods-full-save.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};$('flightImport').onclick=()=>$('flightImportFile').click();$('flightImportFile').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>4e6)throw Error('Save file is too large');const q=JSON.parse(await file.text());if(!restoreFlight(q))throw Error('Invalid save format');saveCheckpoint('auto',true);toast('Imported full game state.')}catch(e){toast('Import failed: '+e.message)}e.target.value=''};
 const oldLaunch=$('launch').onclick;$('launch').textContent=checkpointBook().auto?'Continue saved game':'Start game';$('launch').onclick=()=>{if(!loadCheckpoint('auto'))oldLaunch()};
+// Lightweight location memory: intentionally tiny so it still works when the large checkpoint cannot fit localStorage.
+const positionKey='spacegods.position.v1';
+function savePositionMemory(){
+ if(!['flight','dock','jump','landing','liftoff','pause','controls','nav','dockrequest'].includes(state))return false;
+ try{localStorage.setItem(positionKey,JSON.stringify({v:1,at:Date.now(),system:save.system,state:stableFlightState(),x:ship.x,y:ship.y,z:ship.z,yaw:ship.yaw,pitch:ship.pitch,speed:ship.speed,throttle:ship.throttle,hull:ship.hull,fuel:ship.fuel,target,carrying,clearance,dockPhase,podRoute,view}));return true}catch(e){return false}
+}
+function loadPositionMemory(){
+ try{const q=JSON.parse(localStorage.getItem(positionKey)||'null');if(!q||q.v!==1||!Number.isInteger(q.system)||q.system<0||q.system>=systems.length||!['x','y','z','yaw','pitch'].every(k=>Number.isFinite(q[k])))return false;
+ save.system=q.system;Object.assign(ship,{x:q.x,y:q.y,z:q.z,yaw:q.yaw,pitch:q.pitch,speed:Number.isFinite(q.speed)?q.speed:0,hull:Number.isFinite(q.hull)?q.hull:100,fuel:Number.isFinite(q.fuel)?q.fuel:100});
+ target=q.target||'station';carrying=!!q.carrying;clearance=!!q.clearance;dockPhase=q.dockPhase||'hold';podRoute=q.podRoute||'pod';view=q.view==='chase'?'chase':'cockpit';auto=false;boost=0;keys.clear();releaseMouse();
+ state=q.state==='dock'?'dock':'flight';for(const id of ['start','pausePanel','dockPanel','lostPanel','navPanel','commandPanel','dockingPanel','stationBuilder','flightControlMenu'])$(id)?.classList.add('hidden');
+ setThrottle(Number.isFinite(q.throttle)?q.throttle:0);$('hud').style.display=state==='dock'?'none':'block';if(state==='dock'){$('dockPanel').classList.remove('hidden');dockUI();}updateUI();toast('Position restored · '+currentSystem().name+' system.');return true
+ }catch(e){return false}
+}
+let positionSaveClock=0;
+const positionUpdateBase=update;update=function(dt){positionUpdateBase(dt);positionSaveClock+=dt;if(positionSaveClock>=2){positionSaveClock=0;savePositionMemory()}};
+// Continue uses the full checkpoint first, then the small location memory as a reliable fallback.
+const launchWithMemory=$('launch').onclick;$('launch').textContent=(checkpointBook().auto||localStorage.getItem(positionKey))?'Continue where I was':'Start game';$('launch').onclick=()=>{if(loadCheckpoint('auto'))return;if(loadPositionMemory())return;launchWithMemory()};
+window.addEventListener('pagehide',savePositionMemory);document.addEventListener('visibilitychange',()=>{if(document.hidden)savePositionMemory()});
+window.flightPositionMemory={save:savePositionMemory,load:loadPositionMemory};
+
 window.flightCheckpoints={save:saveCheckpoint,load:loadCheckpoint,capture:captureFlight,restore:restoreFlight,open:openFlightControls};
 window.addEventListener('pagehide',()=>saveCheckpoint('auto',true));document.addEventListener('visibilitychange',()=>{if(document.hidden)saveCheckpoint('auto',true)});
 
