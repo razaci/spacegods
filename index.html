@@ -1487,7 +1487,7 @@ const wanderStyle=document.createElement('style');wanderStyle.textContent='#scen
   let flightAssist=true;
   try { flightAssist = localStorage.getItem('spacegods-fa') !== '0'; } catch (e) {}
   const faVel={x:0,y:0,z:0};
-  const sc={active:false,charging:0,x:900,y:30,z:-240,targetId:'station',orbit:null,navAssist:false};
+  const sc={active:false,charging:0,x:900,y:30,z:-240,targetId:'station',orbit:null};
   const planetNames=['Cinder','Lumen','Vale','Shard','Helion','Mercy','Dust','Riven'];
   const moonNames=['Iris','Keel','Moth','Quill','Sable','Tarn','Umber','Wisp'];
   function scBodies(){
@@ -1516,40 +1516,23 @@ const wanderStyle=document.createElement('style');wanderStyle.textContent='#scen
   }
   function scDrop(emergency){
     if(!sc.active)return;
-    if(window.__sgForceDropRequested){emergency=true;window.__sgForceDropRequested=false;}
     const b=scBody(sc.targetId), d=scDist(b), dot=scAlign(b);
     const dropRange=b.kind==='star'?40:b.kind==='station'?8:b.kind==='signal'?12:18;
     const safe=d<dropRange&&dot>0.9&&ship.throttle<0.82&&!emergency;
     if(!safe&&!emergency){toast(d>=dropRange?'Too far to drop. Close under '+dropRange+' ls.':dot<=0.9?'Align with the destination lock.':'Throttle down into the blue zone.');return;}
-    sc.active=false;sc.charging=0;sc.navAssist=false;
-    // A clean destination drop gets the authored close-arrival scene. A manual/forced
-    // drop preserves the current supercruise location as an isolated normal-space pocket.
-    if(emergency){
-      const pocketScale=2400;
-      const ox=(sc.x-498)*pocketScale, oy=(sc.y-22)*pocketScale, oz=(sc.z-96)*pocketScale;
-      ship.x=station.x+ox; ship.y=station.y+oy; ship.z=station.z+oz;
-      ship.speed=18; setThrottle(.18); faVel.x=faVel.y=faVel.z=0;
-      sc.orbit=null; target='station'; auto=false; cruise=false; boost=0;
-      toast('Manual dropout. Deep normal space at your current supercruise position.');
-    } else {
-      scPlace(b.kind);
-      sc.orbit=b.kind==='planet'||b.kind==='star'?b.name:null;
-      toast('Safe dropout at '+b.name+'. Normal space.');
-    }
+    sc.active=false;sc.charging=0;scPlace(b.kind);sc.orbit=b.kind==='planet'||b.kind==='star'?b.name:null;
+    if(emergency){ship.hull=Math.max(8,ship.hull-12);toast('Emergency drop. Hull strained. Normal space restored.');}
+    else toast('Safe dropout at '+b.name+'. Normal space.');
     if(window.flightCheckpoints)window.flightCheckpoints.capture();
   }
   function scEnter(){
-    sc.charging=0;sc.active=true;sc.orbit=null;sc.navAssist=false;sc.x=860;sc.y=24;sc.z=-220;
+    sc.charging=0;sc.active=true;sc.orbit=null;sc.x=860;sc.y=24;sc.z=-220;
     if(!scBodies().some(b=>b.id===sc.targetId))sc.targetId='station';
     ship.speed=0;setThrottle(.45);faVel.x=faVel.y=faVel.z=0;keys.clear();
     toast('Supercruise engaged. Lock a body, stay in the blue zone, then drop.');
   }
   function scEngage(){
-    if(sc.active){
-      // Player-requested dropout always exits at the current location. Destination
-      // arrival remains available through the automatic safe-drop path.
-      scDrop(true);return;
-    }
+    if(sc.active){scDrop(false);return;}
     if(state!=='flight'){toast('Launch before engaging the frameshift drive.');return;}
     if(sc.charging>0)return;
     if(hostileNearby()){toast('Hostiles nearby. Clear them before supercruise.');return;}
@@ -1557,17 +1540,10 @@ const wanderStyle=document.createElement('style');wanderStyle.textContent='#scen
     if(typeof voyage!=='undefined'&&voyage){toast('Finish the automated route before supercruise.');return;}
     stopHelpers();sc.charging=3.2;toast('Frameshift charging. Hold your line.');
   }
-  function scSelect(id){
-    if(!scBodies().some(b=>b.id===id))return;
-    sc.targetId=id;sc.navAssist=true;auto=false;
-    const b=scBody(id);
-    setThrottle(Math.max(ship.throttle,.62));
-    toast('Supercruise route engaged: '+b.name+'. Autopilot aligning and approaching.');
-  }
   function scCycle(step){
     const list=scBodies();
     let i=list.findIndex(b=>b.id===sc.targetId);
-    i=(i+step+list.length)%list.length;scSelect(list[i].id);
+    i=(i+step+list.length)%list.length;sc.targetId=list[i].id;toast('Nav lock: '+list[i].name);
   }
   function scSteer(dt){
     let yawInput=stick.x+(keys.has('d')||keys.has('arrowright')?1:0)-(keys.has('a')||keys.has('arrowleft')?1:0);
@@ -1581,20 +1557,6 @@ const wanderStyle=document.createElement('style');wanderStyle.textContent='#scen
     if(!sc.active||state!=='flight')return;
     scSteer(dt);
     const b=scBody(sc.targetId), d=Math.max(0.004,scDist(b));
-    if(sc.navAssist){
-      const dx=b.x-sc.x,dy=b.y-sc.y,dz=b.z-sc.z;
-      const wantYaw=Math.atan2(dx,dz), wantPitch=Math.atan2(dy,Math.hypot(dx,dz));
-      ship.yaw+=angle(wantYaw-ship.yaw)*Math.min(1,dt*2.2);
-      ship.pitch+=clamp(wantPitch-ship.pitch,-.8,.8)*Math.min(1,dt*2.0);
-      const arrival=b.kind==='star'?18:b.kind==='station'?2.2:b.kind==='signal'?3.5:5;
-      const desiredThrottle=d<arrival*3?.28:d<arrival*8?.45:.72;
-      setThrottle(desiredThrottle);
-      if(d<=arrival&&scAlign(b)>.96){
-        sc.navAssist=false;setThrottle(.18);ship.speed=Math.min(ship.speed,.35);
-        toast('ARRIVAL LOCK: '+b.name+'. Dropping to normal space.');
-        scDrop(false);return;
-      }
-    }
     const blueHi=Math.min(8,d*0.22), blueLo=blueHi*0.45, maxS=Math.min(28,Math.max(0.35,d*0.55));
     ship.speed+=(ship.throttle*maxS-ship.speed)*Math.min(1,dt*1.6);
     const f=scFwd();sc.x+=f.x*ship.speed*dt;sc.y+=f.y*ship.speed*dt;sc.z+=f.z*ship.speed*dt;
@@ -1654,7 +1616,7 @@ const wanderStyle=document.createElement('style');wanderStyle.textContent='#scen
     if($('scBtn'))$('scBtn').textContent=sc.active?'Drop out':'Supercruise';
     const panel=$('scNav');
     if(panel){panel.style.display=sc.active?'block':'none';
-      if(sc.active){const list=$('scNavList');list.innerHTML=scBodies().map(b=>'<button data-id="'+b.id+'" style="display:block;width:100%;text-align:left;margin-top:6px;'+(b.id===sc.targetId?'border-color:#ffd88a':'')+'"><b>'+b.name+'</b><br>'+b.kind+' · '+fmtLs(scDist(b))+'</button>').join('');list.querySelectorAll('button').forEach(btn=>btn.onclick=()=>{scSelect(btn.dataset.id);updateUI();});}
+      if(sc.active){const list=$('scNavList');list.innerHTML=scBodies().map(b=>'<button data-id="'+b.id+'" style="display:block;width:100%;text-align:left;margin-top:6px;'+(b.id===sc.targetId?'border-color:#ffd88a':'')+'"><b>'+b.name+'</b><br>'+b.kind+' · '+fmtLs(scDist(b))+'</button>').join('');list.querySelectorAll('button').forEach(btn=>btn.onclick=()=>{sc.targetId=btn.dataset.id;updateUI();});}
     }
     if(sc.charging>0){$('assistState').textContent='FRAMESHIFT CHARGE '+sc.charging.toFixed(1)+'s';return;}
     if(!flightAssist&&!sc.active)$('assistState').textContent=auto?'APPROACH ASSIST ACTIVE':'FLIGHT ASSIST OFF';
@@ -1663,7 +1625,7 @@ const wanderStyle=document.createElement('style');wanderStyle.textContent='#scen
     $('speed').textContent=(ship.speed*299792).toFixed(0);
     $('assistState').textContent='SUPERCRUISE'+(sc._blue?' · BLUE ZONE':ship.throttle>0.75?' · TOO FAST':' · SET THROTTLE');
     $('mission').textContent=currentSystem().name.toUpperCase()+' SUPERCRUISE';
-    $('objective').textContent=b.name+' · '+(sc.navAssist?'NAV ASSIST · ':'')+(sc._aligned?'ALIGNED':'TURN TO LOCK')+' · '+(sc._range?'IN DROP RANGE':'CLOSING');
+    $('objective').textContent=b.name+' · '+(sc._aligned?'ALIGNED':'TURN TO LOCK')+' · '+(sc._range?'IN DROP RANGE':'CLOSING');
     $('range').textContent=fmtLs(d)+' · '+(ship.speed<0.01?'0':ship.speed.toFixed(2))+' ls/s';
     $('bearing').textContent=b.kind.toUpperCase()+' LOCK';
   };
@@ -1869,65 +1831,28 @@ body.cartoon progress{accent-color:#7ef0c8;border:2px solid #071018;border-radiu
 
 
 
-<style id="supercruise-escape-redesign">
-#scEscapeBox{position:absolute;left:50%;bottom:155px;transform:translateX(-50%);z-index:25;display:none;pointer-events:auto;width:min(430px,calc(100% - 28px));padding:10px;border:1px solid #72e6dc;background:#061522e8;border-radius:14px;box-shadow:0 12px 40px #0008;text-align:center}
-#scEscapeBox .scmode{font-size:10px;letter-spacing:.16em;color:#8cebdd}#scEscapeBox .scdest{font-size:13px;color:#fff0bd;margin:3px 0 8px}#scDropNow{width:100%;background:#b8fff1;color:#06251f;border:0;font-weight:900;font-size:14px;padding:12px}#scEscapeHint{font-size:10px;color:#9fc3cf;margin-top:6px}
-@media(max-width:600px){#scEscapeBox{bottom:147px;width:calc(100% - 22px);padding:8px}#scDropNow{padding:11px}}
-</style>
-<script id="supercruise-escape-redesign-script">
+<script>
+// RIFT VISUAL EXPANSION — bounded procedural scenery, no network assets.
 (()=>{
-  const $=id=>document.getElementById(id);
-  function mount(){
-    if(!$('hud')||$('scEscapeBox'))return;
-    const box=document.createElement('div');box.id='scEscapeBox';
-    box.innerHTML='<div class="scmode">FRAME SHIFT · SUPERCRUISE</div><div class="scdest" id="scEscapeDest">NORMAL SPACE AVAILABLE</div><button id="scDropNow">DROP TO NORMAL SPACE</button><div id="scEscapeHint">G or X · drop exactly where you are</div>';
-    $('hud').appendChild(box);
-    $('scDropNow').onclick=()=>forceDrop();
-  }
-  function forceDrop(){
-    const api=window.supercruise;
-    if(!api||!api.active)return;
-    // The original safe-drop rules can refuse the player's request. This explicit escape
-    // path invokes the existing emergency exit so the player can never be trapped.
-    if(typeof api.emergencyDrop==='function')api.emergencyDrop();
-    else if(typeof api.drop==='function'){
-      // Temporarily use the internal keyboard/button path only if an emergency method is unavailable.
-      try{const e=new KeyboardEvent('keydown',{key:'g',bubbles:true});document.dispatchEvent(e);}catch(err){}
-    }
-  }
-  function refresh(){
-    mount(); const api=window.supercruise, active=!!(api&&api.active), box=$('scEscapeBox');
-    if(box)box.style.display=active?'block':'none';
-    if(active&&$('scEscapeDest'))$('scEscapeDest').textContent='LOCK: '+String(api.target||'destination').toUpperCase()+' · EXIT AVAILABLE NOW';
-    const b=$('scBtn');if(b&&active){b.textContent='DROP TO NORMAL';b.style.background='#b8fff1';b.style.color='#06251f';b.style.fontWeight='900';}else if(b){b.style.background='';b.style.color='';b.style.fontWeight='';}
-  }
-  // Expose a non-punitive, unconditional dropout while preserving all existing arrival placement.
-  const install=setInterval(()=>{
-    if(window.supercruise){
-      clearInterval(install);
-      const api=window.supercruise;
-      if(!api.emergencyDrop){
-        api.emergencyDrop=()=>{
-          // Calling the original internal emergency branch is not exposed, so normalize the
-          // ship through the public state by first trying the regular drop; if still active,
-          // use a tiny compatibility hook installed below.
-          if(typeof window.__spaceGodsForceSupercruiseDrop==='function')window.__spaceGodsForceSupercruiseDrop();
-          else api.drop();
-        };
-      }
-      refresh();
-    }
-  },100);
-  // Compatibility hook: patch the public object with a direct state exit by using its existing
-  // checkpoint restore path when available. A synthetic double G is intentionally avoided.
-  window.__spaceGodsForceSupercruiseDrop=()=>{
-    const api=window.supercruise;if(!api||!api.active)return;
-    // scDrop(true) is lexically scoped, but api.engage points at scEngage. Temporarily mark a
-    // one-shot request consumed by the source-level patched handler below.
-    window.__sgForceDropRequested=true;api.engage();
-  };
-  addEventListener('keydown',e=>{if((e.key==='x'||e.key==='X')&&window.supercruise&&window.supercruise.active){e.preventDefault();forceDrop();}},true);
-  setInterval(refresh,180);
+let quality='medium';try{quality=localStorage.getItem('sg-rift-quality')||quality}catch(e){}if(!['low','medium','high'].includes(quality))quality='medium';
+const counts=()=>quality==='low'?12:quality==='high'?48:28;
+const neb=document.createElement('canvas');neb.width=1024;neb.height=512;const ng=neb.getContext('2d');
+for(let i=0;i<24;i++){const x=(i*179)%1024,y=256+Math.sin(i*1.71)*150,r=100+i%5*23,g=ng.createRadialGradient(x,y,0,x,y,r);g.addColorStop(0,i%2?'#5f2fae50':'#167c9c50');g.addColorStop(.5,'#293f7325');g.addColorStop(1,'#00000000');ng.fillStyle=g;ng.fillRect(x-r,y-r,r*2,r*2)}
+const settings=document.createElement('label');settings.style.cssText='display:flex;align-items:center;gap:8px;margin:10px 0;color:#aeeaff';settings.innerHTML='Rift graphics <select aria-label="Graphics quality"><option value="low">Low · phone</option><option value="medium">Medium</option><option value="high">High</option></select>';const select=settings.querySelector('select');select.value=quality;select.onchange=()=>{quality=select.value;try{localStorage.setItem('sg-rift-quality',quality)}catch(e){}};document.querySelector('#pausePanel .panel').append(settings);
+const oldBg=bg;bg=function(){oldBg();ctx.save();ctx.globalCompositeOperation='screen';const drift=Math.sin(ship.yaw)*width*.18;ctx.globalAlpha=quality==='low'?.45:.8;ctx.drawImage(neb,-width*.2+drift,-height*.15,width*1.4,height*.9);ctx.restore();riftSky();};
+function riftSky(){const p=project(camera(-.58,.2,.8,true));if(!p)return;const r=Math.min(width,height)*.12;ctx.save();ctx.translate(p.x,p.y);ctx.rotate(-.35+Math.sin(time*.12)*.03);ctx.scale(.28,1);ctx.lineWidth=2;ctx.strokeStyle='#a97bff';ctx.shadowColor='#845cff';ctx.shadowBlur=quality==='low'?0:16;for(let j=0;j<3;j++){ctx.beginPath();for(let i=0;i<=48;i++){const a=i/48*Math.PI*2,k=r*(1+Math.sin(a*7+time*.7+j)*.05+j*.075);const x=Math.cos(a)*k,y=Math.sin(a)*k;i?ctx.lineTo(x,y):ctx.moveTo(x,y)}ctx.closePath();ctx.stroke()}ctx.fillStyle='#040516';ctx.beginPath();ctx.ellipse(0,0,r*.85,r*.85,0,0,Math.PI*2);ctx.fill();ctx.restore();}
+const oldPlanet=planet;planet=function(){oldPlanet();const p=worldPoint(-3600,1700,12000);if(!p)return;const r=Math.min(800,900*focal/p.z);if(r<2)return;ctx.save();const g=ctx.createRadialGradient(p.x-r*.4,p.y-r*.4,0,p.x,p.y,r);g.addColorStop(0,'#b1acc0');g.addColorStop(.55,'#4a3c65');g.addColorStop(1,'#0a1024');ellipse(p.x,p.y,r,r,g);ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.clip();for(let j=0;j<5;j++){ctx.beginPath();ctx.moveTo(p.x-r,p.y-r+j*r*.43);for(let k=0;k<10;k++)ctx.lineTo(p.x-r+k*r*.23,p.y-r+j*r*.43+Math.sin(k*2+j)*r*.12);ctx.strokeStyle='#9f78e5';ctx.lineWidth=Math.max(1,r*.009);ctx.stroke()}ctx.restore();};
+function box(x,y,z,w,h,d){worldPolygon([[x-w,y,z-d],[x+w,y,z-d],[x+w,y+h,z-d],[x-w,y+h,z-d]],'#192e45','#6499b4');worldPolygon([[x+w,y,z-d],[x+w,y,z+d],[x+w,y+h,z+d],[x+w,y+h,z-d]],'#0b182c','#355b77');worldPolygon([[x-w,y+h,z-d],[x+w,y+h,z-d],[x+w,y+h,z+d],[x-w,y+h,z+d]],'#34556c','#77b8cd');for(let a=0;a<4;a++)for(let b=0;b<3;b++){const p=worldPoint(x-w*.7+b*w*.7,y+h*(a+1)/5,z-d-1);if(p&&p.z>20){ctx.fillStyle=(a+b)%3?'#7adce8':'#ffd694';ctx.fillRect(p.x,p.y,clamp(3*focal/p.z,1,4),clamp(2*focal/p.z,1,3))}}}
+const oldStation=stationDraw;stationDraw=function(){ctx.save();const sx=station.x,sy=station.y,sz=station.z;worldPolygon([[sx+500,sy-280,sz-200],[sx+1700,sy-280,sz-200],[sx+1700,sy-280,sz+1100],[sx+500,sy-280,sz+1100]],'#0d2339','#49768c');for(let i=0;i<(quality==='low'?8:18);i++){const x=sx+650+i%6*170,z=sz+Math.floor(i/6)*350;box(x,sy-280,z,48,100+(i*47)%260,65);if(i%4===0){segment([x,sy-280,z],[x,sy+140,z],'#d1a363',2);const swing=Math.sin(time*.15+i)*60;segment([x-90,sy+140,z],[x+100,sy+140,z+swing],'#ffc872',2);segment([x+100,sy+140,z+swing],[x+100,sy+35+Math.sin(time*.5+i)*22,z+swing],'#83c9d2')}}ctx.restore();oldStation();};
+const oldNpc=npcShip;npcShip=function(n,...args){ctx.save();if(state==='flight'){const a=worldPoint(n.x,n.y,n.z),b=worldPoint(n.x-Math.sin(n.yaw||0)*85,n.y,n.z-Math.cos(n.yaw||0)*85);if(a&&b&&a.z>20&&b.z>20)line(a.x,a.y,b.x,b.y,args[0]?'#ff805a80':'#74dfff70',clamp(8*focal/a.z,1,5))}ctx.restore();oldNpc(n,...args);};
+const oldCockpit=cockpit;cockpit=function(){oldCockpit();ctx.save();const y=height*.93,r=Math.min(27,width*.038);for(let i=0;i<3;i++){const x=width*.5+(i-1)*r*3.1,value=clamp((i===0?ship.fuel:i===1?ship.hull:ship.speed/normalSpeed()*100)/100,0,1);ellipse(x,y,r,r,'#051220','#306178');ctx.strokeStyle=['#64e2ff','#a1f6bd','#b99aff'][i];ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,y,r*.78,-Math.PI*.8,-Math.PI*.8+value*Math.PI*1.6);ctx.stroke();ctx.fillStyle='#c8f1ff';ctx.font=Math.max(8,r*.38)+'px monospace';ctx.textAlign='center';ctx.fillText(['FUEL','HULL','VEL'][i],x,y+3)}ctx.restore();};
+const riftCombatBase=combatEffects;combatEffects=function(){riftCombatBase();ctx.save();ctx.globalCompositeOperation='screen';for(const b of bursts){const p=worldPoint(b.x,b.y,b.z);if(!p||p.z<5)continue;const r=clamp(70*focal/p.z,5,130),g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,r);g.addColorStop(0,'#fff5c9cc');g.addColorStop(.22,'#ffb56a99');g.addColorStop(1,'#a547ff00');ctx.globalAlpha=clamp(b.life*3,0,1);ctx.fillStyle=g;ctx.fillRect(p.x-r,p.y-r,r*2,r*2)}ctx.restore();};
+let lastHull=ship.hull,shieldPulse=0;
+const oldRender=render;render=function(){oldRender();if(!['flight','jump','landing','liftoff'].includes(state))return;ctx.save();if(state==='flight'&&window.supercruise&&window.supercruise.active){ctx.globalCompositeOperation='screen';ctx.globalAlpha=.35;ctx.drawImage(neb,-width*.1,-height*.1,width*1.2,height*.85);ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';riftSky()}if(ship.hull<lastHull)shieldPulse=time+.7;lastHull=ship.hull;if(time<shieldPulse){const a=(shieldPulse-time)/.7,g=ctx.createRadialGradient(width/2,height*.46,Math.min(width,height)*.2,width/2,height*.46,Math.max(width,height)*.7);g.addColorStop(0,'#38caff00');g.addColorStop(1,'#38caff70');ctx.globalAlpha=a;ctx.fillStyle=g;ctx.fillRect(0,0,width,height);ctx.globalAlpha=1;ctx.strokeStyle='#91e4ff';ctx.beginPath();ctx.ellipse(width/2,height*.46,width*(.3+(1-a)*.3),height*(.25+(1-a)*.3),0,0,Math.PI*2);ctx.stroke()}
+if(state==='jump'){const cx=width/2,cy=height*.46;ctx.globalCompositeOperation='screen';for(let i=0;i<counts();i++){const phase=((i/counts()+time*.45)%1),r=15+phase*phase*Math.max(width,height);ctx.strokeStyle=i%2?'#aa74ff66':'#4ee6ff66';ctx.lineWidth=1+phase*4;ctx.beginPath();ctx.ellipse(cx,cy,r,r*.68,Math.sin(time*.2)*.1,0,Math.PI*2);ctx.stroke()}}
+if(state==='flight'&&!(window.supercruise&&window.supercruise.active)){for(let i=0;i<counts();i++){const x=ship.x+Math.sin(i*7.17)*2200,y=ship.y+Math.cos(i*4.3)*1600,z=ship.z+((i*179-time*ship.speed*.2)%3200+3200)%3200+100,p=worldPoint(x,y,z);if(p){ctx.fillStyle=i%3?'#82b9d855':'#bba3ef77';const s=clamp(7*focal/p.z,1,5);ctx.fillRect(p.x,p.y,s,s)}}}
+ctx.restore();};
 })();
+
 </script>
 </body></html>
