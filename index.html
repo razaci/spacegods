@@ -1437,6 +1437,273 @@ const baseMissionButton=document.createElement('button');baseMissionButton.textC
 combatJobUI=function(){$('combatJobCards').innerHTML=combatJobs.slice(0,baseJobStart).map((j,i)=>'<article class="commandcard"><b>'+j.name+'</b><p>'+j.brief+' '+j.waves.length+' waves · '+j.reward+' cr</p><button id="combatJob'+i+'" '+(save.contract?'disabled':'')+'>Accept operation</button></article>').join('');for(let i=0;i<baseJobStart;i++)$('combatJob'+i).onclick=()=>acceptCombatJob(i)};
 const baseState=stableFlightState;stableFlightState=function(){return state==='basemissions'?'dock':baseState()};const baseRestore=restoreFlight;restoreFlight=function(q){baseMissionPanel.classList.add('hidden');return baseRestore(q)};window.flightCheckpoints.restore=q=>restoreFlight(q);window.baseMissionDesk={open:openBaseMissions,get count(){return combatJobs.length-baseJobStart}};combatJobUI();
 
+let travelScene=null,cinematicPreviousView=null;
+const travelSkip=document.createElement('button');travelSkip.id='travelSkip';travelSkip.textContent='Skip scene';travelSkip.hidden=true;travelSkip.style.cssText='position:fixed;right:16px;top:16px;z-index:9999;padding:12px 18px;background:#071322;color:#c9fff3;border:1px solid #7ae9dd;border-radius:10px';document.body.appendChild(travelSkip);
+const cinematicStyle=document.createElement('style');cinematicStyle.textContent='body.travel-cinema #hud,body.travel-cinema #touch,body.travel-cinema #notice{visibility:hidden!important}';document.head.appendChild(cinematicStyle);
+function cinematicUI(active){document.body.classList.toggle('travel-cinema',active);travelSkip.hidden=!active;}
+function finishTravelScene(){if(!travelScene)return;travelScene=null;state='flight';if(cinematicPreviousView!==null)view=cinematicPreviousView;cinematicPreviousView=null;cinematicUI(false);updateUI();saveCheckpoint('auto',true);}
+const cinematicJump=startJump;startJump=function(i){const ok=cinematicJump(i);if(ok){cinematicUI(true);releaseMouse();keys.clear();}return ok;};
+const cinematicArrival=arrive;arrive=function(){cinematicArrival();if(state==='flight'){cinematicPreviousView=view;travelScene={t:0,duration:6};state='arrivalcinema';cinematicUI(true);}else cinematicUI(false);};
+travelSkip.onclick=function(){if(state==='jump'){jumpClock=warpDuration;arrive();finishTravelScene();}else if(travelScene)finishTravelScene();else if(landingMotion){landingMotion.t=landingMotion.duration;update(.001);cinematicUI(false);}};
+const cinematicUpdate=update;update=function(dt){if(travelScene&&state==='arrivalcinema'){travelScene.t=Math.min(travelScene.duration,travelScene.t+dt);if(travelScene.t>=travelScene.duration)finishTravelScene();return;}cinematicUpdate(dt);};
+const cinematicStable=stableFlightState;stableFlightState=function(){return state==='arrivalcinema'?'flight':cinematicStable();};
+const cinematicRestore=restoreFlight;restoreFlight=function(q){travelScene=null;cinematicPreviousView=null;cinematicUI(false);return cinematicRestore(q);};
+const cinematicRender=render;render=function(){const scene=travelScene,landing=landingMotion,active=state==='jump'||!!scene||!!landing;cinematicUI(active);const oldView=view,oldDistance=chaseDistance;
+if(scene||landing){view='chase';const u=scene?scene.t/scene.duration:landing.t/landing.duration;chaseDistance=scene?190-95*Math.sin(u*Math.PI/2):155+25*Math.sin(u*Math.PI);}
+try{cinematicRender();if(state==='jump'&&jumpClock<3){ctx.save();ctx.translate(width*.5,height*.72);const s=Math.min(width,height)*.18;ctx.fillStyle='#193a50';ctx.strokeStyle='#a1f4ff';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,-s*.8);ctx.lineTo(s*.3,-s*.1);ctx.lineTo(s*.9,s*.45);ctx.lineTo(s*.22,s*.3);ctx.lineTo(0,s*.5);ctx.lineTo(-s*.22,s*.3);ctx.lineTo(-s*.9,s*.45);ctx.lineTo(-s*.3,-s*.1);ctx.closePath();ctx.fill();ctx.stroke();ctx.fillStyle='#84edff';ctx.fillRect(-s*.16,s*.35,s*.32,10+Math.sin(time*30)*4);ctx.restore();}
+if(active){ctx.save();ctx.fillStyle='#000';ctx.fillRect(0,0,width,height*.075);ctx.fillRect(0,height*.91,width,height*.09);if(scene){ctx.textAlign='center';ctx.fillStyle='#c0fff0';ctx.font='bold '+Math.max(13,Math.min(22,width/25))+'px system-ui';ctx.fillText('ARRIVAL · '+currentSystem().station.toUpperCase(),width/2,height*.87);}ctx.restore();}}
+finally{view=oldView;chaseDistance=oldDistance;}};
+window.travelCinematics={skip:()=>travelSkip.click(),get active(){return state==='jump'||!!travelScene||!!landingMotion;}};
+
+// Scenic free flight remains real flight: position and elapsed progress are saved.
+let scenicFlight={active:false,elapsed:0,chatter:35,encounters:false,nextEncounter:90,message:'',messageTime:0};
+const scenicPanel=document.createElement('div');scenicPanel.id='scenicFlightPanel';scenicPanel.style.cssText='position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:101;width:min(580px,94vw);padding:12px;background:#061625e8;border:1px solid #68cfc8;border-radius:14px;text-align:center';scenicPanel.innerHTML='<div id="scenicFlightCaption" style="color:#b9f9eb;margin-bottom:8px"></div><div class="row" style="justify-content:center"><button id="scenicResume">Take controls</button><button id="scenicCamera">Camera: cinematic</button><button id="scenicEncounters">Encounters OFF</button></div>';scenicPanel.hidden=true;document.body.appendChild(scenicPanel);
+const scenicButton=document.createElement('button');scenicButton.id='scenicFlightButton';scenicButton.textContent='Scenic flight';$('view').after(scenicButton);
+let scenicCamera=true;
+function scenicUI(){scenicPanel.hidden=!scenicFlight.active||state!=='flight';$('scenicEncounters').textContent='Encounters '+(scenicFlight.encounters?'ON':'OFF');$('scenicCamera').textContent='Camera: '+(scenicCamera?'cinematic':'cockpit');$('scenicFlightCaption').textContent=scenicFlight.messageTime>0?scenicFlight.message:'FREE FLIGHT · '+currentSystem().name+' · '+Math.floor(scenicFlight.elapsed/60)+'m '+Math.floor(scenicFlight.elapsed%60)+'s';scenicButton.textContent=scenicFlight.active?'End scenic flight':'Scenic flight';}
+function stopScenicFlight(message){if(!scenicFlight.active)return;scenicFlight.active=false;setThrottle(0);scenicUI();if(message)toast(message);}
+function toggleScenicFlight(){if(scenicFlight.active){stopScenicFlight('Flight controls restored.');return;}if(state!=='flight'){toast('Launch first to enter scenic flight.');return;}if(pirates.some(p=>p.hull>0)){toast('Clear nearby enemies before scenic flight.');return;}if(voyage||missionAssist||dockingGuidance||clearance){toast('Finish travel or docking assistance before scenic flight.');return;}auto=false;cruise=false;boost=0;miningActive=false;keys.clear();releaseMouse();setThrottle(.35);scenicFlight.active=true;scenicFlight.message='Free flight engaged. Your ship keeps moving. Take controls at any time.';scenicFlight.messageTime=7;scenicUI();saveCheckpoint('auto',true);}
+scenicButton.onclick=toggleScenicFlight;$('scenicResume').onclick=()=>stopScenicFlight('Flight controls restored.');$('scenicCamera').onclick=()=>{scenicCamera=!scenicCamera;scenicUI();};$('scenicEncounters').onclick=()=>{scenicFlight.encounters=!scenicFlight.encounters;scenicFlight.nextEncounter=90;scenicUI();saveCheckpoint('auto',true);};
+const scenicComms=['TRAFFIC: Clear skies ahead. Safe travels, commander.','EXPLORER: The stars look different from out here.','CONTROL: Navigation beacons operating normally.','HAULER: Cargo secure. Continuing on our outbound route.','FLIGHT: Drive stable. Enjoy the view.','SURVEY: Distant signals logged for the next expedition.'];
+const scenicUpdate=update;update=function(dt){if(scenicFlight.active&&state==='flight'){if(keys.size||Math.abs(stick.x)+Math.abs(stick.y)>.02||auto||missionAssist||voyage||dockingGuidance||clearance||ship.fuel<=0||pirates.some(p=>p.hull>0)){stopScenicFlight('Scenic flight ended. Take the controls.');}else{scenicFlight.elapsed+=dt;scenicFlight.chatter-=dt;scenicFlight.messageTime=Math.max(0,scenicFlight.messageTime-dt);scenicFlight.nextEncounter-=dt;if(scenicFlight.chatter<=0){scenicFlight.message=scenicComms[Math.floor(scenicFlight.elapsed/75)%scenicComms.length];scenicFlight.messageTime=8;scenicFlight.chatter=65+Math.random()*35;radio(scenicFlight.message);}if(scenicFlight.encounters&&scenicFlight.nextEncounter<=0&&!save.contract&&distance(station)>1200){spawnPirates(true);pirates.forEach((p,i)=>{p.x=ship.x+Math.sin(ship.yaw)*(1500+i*140)+Math.cos(ship.yaw)*(i-1)*240;p.y=ship.y+100;p.z=ship.z+Math.cos(ship.yaw)*(1500+i*140);});target='hostile';combatTargetIndex=0;scenicFlight.nextEncounter=120;stopScenicFlight('Incoming criminal patrol. Flight controls restored.');}scenicUI();}}scenicUpdate(dt);if(scenicFlight.active&&state!=='flight')scenicUI();};
+const scenicRender=render;render=function(){const ov=view,od=chaseDistance;if(scenicFlight.active&&state==='flight'){view=scenicCamera?'chase':'cockpit';if(scenicCamera)chaseDistance=145+45*Math.sin(scenicFlight.elapsed*.13);}try{scenicRender();if(scenicFlight.active&&state==='flight'&&scenicCamera){ctx.save();ctx.fillStyle='#000';ctx.fillRect(0,0,width,height*.045);ctx.fillRect(0,height*.955,width,height*.045);ctx.restore();}}finally{view=ov;chaseDistance=od;}};
+const scenicCapture=captureFlight;captureFlight=function(){const q=scenicCapture();q.scenicFlight={...scenicFlight};q.scenicCamera=scenicCamera;return q;};const scenicRestore=restoreFlight;restoreFlight=function(q){const result=scenicRestore(q);if(!q)return result;scenicFlight=Object.assign({active:false,elapsed:0,chatter:35,encounters:false,nextEncounter:90,message:'',messageTime:0},q.scenicFlight||{});scenicFlight.active=scenicFlight.active&&state==='flight';scenicCamera=q.scenicCamera!==false;scenicUI();return result;};window.flightCheckpoints.capture=()=>captureFlight();window.flightCheckpoints.restore=q=>restoreFlight(q);
+const scenicSteer=mouseSteer;mouseSteer=function(dx,dy){if(dx||dy)stopScenicFlight();scenicSteer(dx,dy);};for(const id of ['brake','boost','auto','nav','openDocking','throttle','combatTarget'])$(id).addEventListener('click',()=>stopScenicFlight(),true);$('throttle').addEventListener('input',()=>stopScenicFlight(),true);
+
+// Deep-space wandering: quiet radio gaps, distant civilian silhouettes and floating camera.
+const wanderingCamera=camera;
+camera=function(x,y,z,dir=false){const p=wanderingCamera(x,y,z,dir);if(scenicFlight.active&&scenicCamera&&state==='flight'){const t=scenicFlight.elapsed;p.x+=Math.sin(t*.055)*(dir?.035:chaseDistance*.38);p.y+=Math.sin(t*.041)*(dir?.018:chaseDistance*.12);}return p;};
+let wanderingAudio=null;
+function setupWanderingAudio(){if(!audio||wanderingAudio)return;const gain=audio.createGain();gain.gain.value=0;gain.connect(audio.destination);for(const hz of [31,47]){const osc=audio.createOscillator(),level=audio.createGain();osc.type='sine';osc.frequency.value=hz;level.gain.value=.035;osc.connect(level);level.connect(gain);osc.start();}wanderingAudio=gain;}
+const wanderingUpdate=update;
+update=function(dt){wanderingUpdate(dt);if(audio){setupWanderingAudio();const active=scenicFlight.active&&state==='flight'&&soundEnabled;wanderingAudio.gain.setTargetAtTime(active?.5+.08*Math.sin(scenicFlight.elapsed*.23):0,audio.currentTime,1.5);}};
+const wanderingRender=render;
+render=function(){wanderingRender();if(!scenicFlight.active||state!=='flight')return;ctx.save();const t=scenicFlight.elapsed;for(let i=0;i<3;i++){const phase=((t+i*47)%150)/150;if(phase<.15||phase>.82)continue;const fade=Math.min(1,(phase-.15)*8,(.82-phase)*8);const x=width*(.12+phase*.76),y=height*(.22+i*.13)+Math.sin(t*.018+i)*height*.025;const size=(i===1?11:7)*Math.min(width/1000,1.4);ctx.globalAlpha=fade*.5;ctx.fillStyle=i===1?'#a2b4c7':'#8198a9';ctx.beginPath();ctx.moveTo(x-size,y);ctx.lineTo(x+size,y-size*.22);ctx.lineTo(x+size*.65,y+size*.3);ctx.lineTo(x-size*.6,y+size*.3);ctx.closePath();ctx.fill();ctx.fillStyle='#87c8e3';ctx.globalAlpha=fade*.35;ctx.fillRect(x-size*1.5,y, size*.55,1); }ctx.restore();};
+const wanderStyle=document.createElement('style');wanderStyle.textContent='#scenicFlightPanel{bottom:max(12px,env(safe-area-inset-bottom));padding:8px!important;background:#061625aa!important} #scenicFlightCaption{font-size:12px}';document.head.appendChild(wanderStyle);
+
+
+// Elite-style supercruise, orbital locks, and flight-assist toggle.
+{
+  let flightAssist=true;
+  try { flightAssist = localStorage.getItem('spacegods-fa') !== '0'; } catch (e) {}
+  const faVel={x:0,y:0,z:0};
+  const sc={active:false,charging:0,x:900,y:30,z:-240,targetId:'station',orbit:null,navAssist:false};
+  const planetNames=['Cinder','Lumen','Vale','Shard','Helion','Mercy','Dust','Riven'];
+  const moonNames=['Iris','Keel','Moth','Quill','Sable','Tarn','Umber','Wisp'];
+  function scBodies(){
+    const i=save.system||0, s=systems[i], hue=s.color||'#8fd0ff';
+    return [
+      {id:'star', name:s.name+' Primary', kind:'star', x:0, y:0, z:0, r:70, color:'#ffd27a'},
+      {id:'p1', name:planetNames[i%8]+' I', kind:'planet', x:460, y:18, z:70, r:26, color:hue},
+      {id:'p2', name:planetNames[i%8]+' II', kind:'planet', x:-240, y:-36, z:620, r:16, color:'#9ec4de'},
+      {id:'moon', name:moonNames[i%8], kind:'planet', x:520, y:34, z:108, r:7, color:'#d9c7a2'},
+      {id:'station', name:s.station, kind:'station', x:498, y:22, z:96, r:3.2, color:'#9aefff'},
+      {id:'signal', name:'Unidentified signal', kind:'signal', x:180, y:48, z:-360, r:1.6, color:'#ffb0ea'}
+    ];
+  }
+  function scBody(id){return scBodies().find(b=>b.id===id)||scBodies()[4];}
+  function scFwd(){const cp=Math.cos(ship.pitch);return {x:Math.sin(ship.yaw)*cp,y:Math.sin(ship.pitch),z:Math.cos(ship.yaw)*cp};}
+  function scDist(b){return Math.hypot(b.x-sc.x,b.y-sc.y,b.z-sc.z);}
+  function scAlign(b){const d=scDist(b)||1,f=scFwd();return ((b.x-sc.x)/d)*f.x+((b.y-sc.y)/d)*f.y+((b.z-sc.z)/d)*f.z;}
+  function fmtLs(ls){if(ls<0.02)return Math.max(1,Math.round(ls*299792))+' km';if(ls<10)return ls.toFixed(2)+' ls';return Math.round(ls)+' ls';}
+  function hostileNearby(){return typeof pirates!=='undefined'&&pirates.some(p=>p.hull>0&&distance(p)<2200);}
+  function stopHelpers(){auto=false;cruise=false;boost=0;if(window.scenicCruise&&window.scenicCruise.status&&window.scenicCruise.status.active)window.scenicCruise.stop('Scenic flight ended.');}
+  function scPlace(kind){
+    if(kind==='station'){ship.x=station.x;ship.y=station.y+8;ship.z=station.z-1500;ship.yaw=0;ship.pitch=0;target='station';}
+    else if(kind==='signal'){ship.x=station.x+900;ship.y=station.y+80;ship.z=station.z+700;ship.yaw=Math.PI*.75;ship.pitch=0;if(typeof spawnPirates==='function'){try{spawnPirates(true);}catch(e){}}}
+    else {ship.x=station.x-600;ship.y=station.y+40;ship.z=station.z+400;ship.yaw=-.4;ship.pitch=-.12;}
+    ship.speed=18;setThrottle(.2);faVel.x=faVel.y=faVel.z=0;
+  }
+  function scDrop(emergency){
+    if(!sc.active)return;
+    if(window.__sgForceDropRequested){emergency=true;window.__sgForceDropRequested=false;}
+    const b=scBody(sc.targetId), d=scDist(b), dot=scAlign(b);
+    const dropRange=b.kind==='star'?40:b.kind==='station'?8:b.kind==='signal'?12:18;
+    const safe=d<dropRange&&dot>0.9&&ship.throttle<0.82&&!emergency;
+    if(!safe&&!emergency){toast(d>=dropRange?'Too far to drop. Close under '+dropRange+' ls.':dot<=0.9?'Align with the destination lock.':'Throttle down into the blue zone.');return;}
+    sc.active=false;sc.charging=0;sc.navAssist=false;
+    // A clean destination drop gets the authored close-arrival scene. A manual/forced
+    // drop preserves the current supercruise location as an isolated normal-space pocket.
+    if(emergency){
+      const pocketScale=2400;
+      const ox=(sc.x-498)*pocketScale, oy=(sc.y-22)*pocketScale, oz=(sc.z-96)*pocketScale;
+      ship.x=station.x+ox; ship.y=station.y+oy; ship.z=station.z+oz;
+      ship.speed=18; setThrottle(.18); faVel.x=faVel.y=faVel.z=0;
+      sc.orbit=null; target='station'; auto=false; cruise=false; boost=0;
+      toast('Manual dropout. Deep normal space at your current supercruise position.');
+    } else {
+      scPlace(b.kind);
+      sc.orbit=b.kind==='planet'||b.kind==='star'?b.name:null;
+      toast('Safe dropout at '+b.name+'. Normal space.');
+    }
+    if(window.flightCheckpoints)window.flightCheckpoints.capture();
+  }
+  function scEnter(){
+    sc.charging=0;sc.active=true;sc.orbit=null;sc.navAssist=false;sc.x=860;sc.y=24;sc.z=-220;
+    if(!scBodies().some(b=>b.id===sc.targetId))sc.targetId='station';
+    ship.speed=0;setThrottle(.45);faVel.x=faVel.y=faVel.z=0;keys.clear();
+    toast('Supercruise engaged. Lock a body, stay in the blue zone, then drop.');
+  }
+  function scEngage(){
+    if(sc.active){
+      // Player-requested dropout always exits at the current location. Destination
+      // arrival remains available through the automatic safe-drop path.
+      scDrop(true);return;
+    }
+    if(state!=='flight'){toast('Launch before engaging the frameshift drive.');return;}
+    if(sc.charging>0)return;
+    if(hostileNearby()){toast('Hostiles nearby. Clear them before supercruise.');return;}
+    if(typeof clearance!=='undefined'&&clearance){toast('Cancel docking clearance before supercruise.');return;}
+    if(typeof voyage!=='undefined'&&voyage){toast('Finish the automated route before supercruise.');return;}
+    stopHelpers();sc.charging=3.2;toast('Frameshift charging. Hold your line.');
+  }
+  function scSelect(id){
+    if(!scBodies().some(b=>b.id===id))return;
+    sc.targetId=id;sc.navAssist=true;auto=false;
+    const b=scBody(id);
+    setThrottle(Math.max(ship.throttle,.62));
+    toast('Supercruise route engaged: '+b.name+'. Autopilot aligning and approaching.');
+  }
+  function scCycle(step){
+    const list=scBodies();
+    let i=list.findIndex(b=>b.id===sc.targetId);
+    i=(i+step+list.length)%list.length;scSelect(list[i].id);
+  }
+  function scSteer(dt){
+    let yawInput=stick.x+(keys.has('d')||keys.has('arrowright')?1:0)-(keys.has('a')||keys.has('arrowleft')?1:0);
+    let pitchInput=-stick.y+(keys.has('w')&&!keys.has('shift')||keys.has('arrowup')?1:0)-(keys.has('s')&&!keys.has('shift')||keys.has('arrowdown')?1:0);
+    if(keys.has('shift'))setThrottle(ship.throttle+((keys.has('w')?1:0)-(keys.has('s')?1:0))*dt*.5);
+    ship.yaw+=clamp(yawInput,-1,1)*dt*.7;ship.pitch=clamp(ship.pitch+clamp(pitchInput,-1,1)*dt*.55,-1.2,1.2);
+    bank+=(clamp(-yawInput,-1,1)*.3-bank)*Math.min(1,dt*3);
+  }
+  function scStep(dt){
+    if(sc.charging>0){sc.charging=Math.max(0,sc.charging-dt);if(sc.charging===0)scEnter();return;}
+    if(!sc.active||state!=='flight')return;
+    scSteer(dt);
+    const b=scBody(sc.targetId), d=Math.max(0.004,scDist(b));
+    if(sc.navAssist){
+      const dx=b.x-sc.x,dy=b.y-sc.y,dz=b.z-sc.z;
+      const wantYaw=Math.atan2(dx,dz), wantPitch=Math.atan2(dy,Math.hypot(dx,dz));
+      ship.yaw+=angle(wantYaw-ship.yaw)*Math.min(1,dt*2.2);
+      ship.pitch+=clamp(wantPitch-ship.pitch,-.8,.8)*Math.min(1,dt*2.0);
+      const arrival=b.kind==='star'?18:b.kind==='station'?2.2:b.kind==='signal'?3.5:5;
+      const desiredThrottle=d<arrival*3?.28:d<arrival*8?.45:.72;
+      setThrottle(desiredThrottle);
+      if(d<=arrival&&scAlign(b)>.96){
+        sc.navAssist=false;setThrottle(.18);ship.speed=Math.min(ship.speed,.35);
+        toast('ARRIVAL LOCK: '+b.name+'. Dropping to normal space.');
+        scDrop(false);return;
+      }
+    }
+    const blueHi=Math.min(8,d*0.22), blueLo=blueHi*0.45, maxS=Math.min(28,Math.max(0.35,d*0.55));
+    ship.speed+=(ship.throttle*maxS-ship.speed)*Math.min(1,dt*1.6);
+    const f=scFwd();sc.x+=f.x*ship.speed*dt;sc.y+=f.y*ship.speed*dt;sc.z+=f.z*ship.speed*dt;
+    ship.fuel=Math.max(0,ship.fuel-dt*0.04);
+    if(d<0.35&&b.kind==='star'){ship.hull-=18*dt;toast('Radiation warning. Turn away from the star.');}
+    sc._blue=ship.speed>=blueLo&&ship.speed<=blueHi;sc._range=d<(b.kind==='star'?40:b.kind==='station'?8:b.kind==='signal'?12:18);sc._aligned=scAlign(b)>0.9;
+    if(ship.fuel<=0){scDrop(true);return;}
+    if(sc._range&&ship.speed>blueHi*1.8&&scAlign(b)>0.75)scDrop(true);
+  }
+  function scProject(b){
+    const old={x:ship.x,y:ship.y,z:ship.z};ship.x=sc.x;ship.y=sc.y;ship.z=sc.z;let p=null;
+    try{p=worldPoint(b.x,b.y,b.z);}catch(e){p=null;}
+    ship.x=old.x;ship.y=old.y;ship.z=old.z;return p;
+  }
+  function drawSupercruise(){
+    ctx.fillStyle='#030713';ctx.fillRect(0,0,width,height);ctx.save();
+    for(let i=0;i<90;i++){
+      const a=(i*2.399)+ship.yaw, yy=((i%17)/17-.5)+ship.pitch*.15, streak=20+ship.speed*6;
+      const x=width*(0.5+Math.sin(a)*.42), y2=height*(0.48+yy*.7);
+      ctx.strokeStyle=i%5?'#9fd8ff22':'#ffe7b822';ctx.beginPath();ctx.moveTo(x,y2);ctx.lineTo(x-(x-width/2)*0.04*streak*0.02,y2+streak);ctx.stroke();
+    }
+    const drawn=scBodies().map(b=>({b,p:scProject(b),d:scDist(b)})).filter(o=>o.p&&o.p.z>0.2).sort((a,c)=>c.d-a.d);
+    for(const o of drawn){
+      const rad=Math.max(o.b.kind==='station'?3:2,(o.b.r*focal)/(o.p.z*8));
+      ctx.beginPath();ctx.fillStyle=o.b.color;ctx.arc(o.p.x,o.p.y,Math.min(rad,height*0.45),0,Math.PI*2);ctx.fill();
+      if(o.b.kind==='star'){ctx.strokeStyle='#ffefc088';ctx.lineWidth=6;ctx.stroke();}
+      if(o.b.id===sc.targetId){ctx.strokeStyle='#f0d48a';ctx.lineWidth=2;ctx.strokeRect(o.p.x-16,o.p.y-16,32,32);ctx.fillStyle='#f0d48a';ctx.font='12px system-ui';ctx.textAlign='center';ctx.fillText(o.b.name+' · '+fmtLs(o.d),o.p.x,o.p.y-22);}
+    }
+    ctx.fillStyle='#071018cc';ctx.fillRect(0,0,width,height*0.06);ctx.fillRect(0,height*0.93,width,height*0.07);
+    ctx.fillStyle='#c9fff2';ctx.textAlign='center';ctx.font='bold 14px system-ui';ctx.fillText('SUPERCRUISE',width/2,height*0.045);ctx.restore();
+  }
+  function drawOrbitHint(){
+    if(!sc.orbit||sc.active||state!=='flight')return;
+    ctx.save();ctx.globalAlpha=.85;ctx.fillStyle=currentSystem().color||'#7eb8d8';
+    ctx.beginPath();ctx.arc(width*0.72,height*0.34,Math.min(width,height)*0.22,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=.35;ctx.fillStyle='#fff6d2';ctx.beginPath();ctx.arc(width*0.66,height*0.28,Math.min(width,height)*0.06,0,Math.PI*2);ctx.fill();ctx.restore();
+  }
+  const scUpdateBase=update;
+  update=function(dt){
+    if(state==='flight'&&(sc.charging>0||sc.active)){scStep(dt);if(ship.hull<=0){state='lost';releaseMouse();$('lostPanel')&&$('lostPanel').classList.remove('hidden');}return;}
+    const prev={x:ship.x,y:ship.y,z:ship.z};
+    scUpdateBase(dt);
+    if(!flightAssist&&state==='flight'&&!auto){
+      ship.x=prev.x;ship.y=prev.y;ship.z=prev.z;const f=scFwd();
+      const thrust=ship.fuel>0?ship.throttle*normalSpeed()*(boost>0?2.1:1):0;
+      faVel.x+=f.x*thrust*dt*0.85;faVel.y+=f.y*thrust*dt*0.85;faVel.z+=f.z*thrust*dt*0.85;
+      if(keys.has(' ')){faVel.x*=Math.max(0,1-dt*1.8);faVel.y*=Math.max(0,1-dt*1.8);faVel.z*=Math.max(0,1-dt*1.8);}
+      ship.x+=faVel.x*dt;ship.y+=faVel.y*dt;ship.z+=faVel.z*dt;ship.speed=Math.hypot(faVel.x,faVel.y,faVel.z);
+    } else if(flightAssist) faVel.x=faVel.y=faVel.z=0;
+  };
+  const scRenderBase=render;
+  render=function(){if(sc.active&&state==='flight'){drawSupercruise();return;}scRenderBase();drawOrbitHint();};
+  const scUiBase=updateUI;
+  updateUI=function(){
+    scUiBase();
+    if($('faBtn'))$('faBtn').textContent=flightAssist?'FA: ON':'FA: OFF';
+    if($('scBtn'))$('scBtn').textContent=sc.active?'Drop out':'Supercruise';
+    const panel=$('scNav');
+    if(panel){panel.style.display=sc.active?'block':'none';
+      if(sc.active){const list=$('scNavList');list.innerHTML=scBodies().map(b=>'<button data-id="'+b.id+'" style="display:block;width:100%;text-align:left;margin-top:6px;'+(b.id===sc.targetId?'border-color:#ffd88a':'')+'"><b>'+b.name+'</b><br>'+b.kind+' · '+fmtLs(scDist(b))+'</button>').join('');list.querySelectorAll('button').forEach(btn=>btn.onclick=()=>{scSelect(btn.dataset.id);updateUI();});}
+    }
+    if(sc.charging>0){$('assistState').textContent='FRAMESHIFT CHARGE '+sc.charging.toFixed(1)+'s';return;}
+    if(!flightAssist&&!sc.active)$('assistState').textContent=auto?'APPROACH ASSIST ACTIVE':'FLIGHT ASSIST OFF';
+    if(!sc.active)return;
+    const b=scBody(sc.targetId), d=scDist(b);
+    $('speed').textContent=(ship.speed*299792).toFixed(0);
+    $('assistState').textContent='SUPERCRUISE'+(sc._blue?' · BLUE ZONE':ship.throttle>0.75?' · TOO FAST':' · SET THROTTLE');
+    $('mission').textContent=currentSystem().name.toUpperCase()+' SUPERCRUISE';
+    $('objective').textContent=b.name+' · '+(sc.navAssist?'NAV ASSIST · ':'')+(sc._aligned?'ALIGNED':'TURN TO LOCK')+' · '+(sc._range?'IN DROP RANGE':'CLOSING');
+    $('range').textContent=fmtLs(d)+' · '+(ship.speed<0.01?'0':ship.speed.toFixed(2))+' ls/s';
+    $('bearing').textContent=b.kind.toUpperCase()+' LOCK';
+  };
+  function scToggleFA(){
+    flightAssist=!flightAssist;
+    faVel.x=Math.sin(ship.yaw)*Math.cos(ship.pitch)*ship.speed;faVel.y=Math.sin(ship.pitch)*ship.speed;faVel.z=Math.cos(ship.yaw)*Math.cos(ship.pitch)*ship.speed;
+    try{localStorage.setItem('spacegods-fa',flightAssist?'1':'0');}catch(e){}
+    toast(flightAssist?'Flight assist on. Velocity follows the nose.':'Flight assist off. The ship keeps its momentum.');
+  }
+  const tools=document.querySelector('.flighttools');
+  if(tools&&!$('scBtn')){
+    const n=document.createElement('button');n.id='navLock';n.textContent='Nav lock';n.title='Cycle supercruise destination';n.onclick=()=>scCycle(1);tools.prepend(n);
+    const f=document.createElement('button');f.id='faBtn';f.textContent=flightAssist?'FA: ON':'FA: OFF';f.title='Flight assist · N';f.onclick=scToggleFA;tools.prepend(f);
+    const b=document.createElement('button');b.id='scBtn';b.textContent='Supercruise';b.title='Frameshift supercruise · G';b.onclick=scEngage;tools.prepend(b);
+  }
+  const panel=document.createElement('div');panel.id='scNav';
+  panel.style.cssText='position:absolute;left:16px;top:150px;z-index:5;display:none;pointer-events:auto;background:#071422e6;border:1px solid #6ecfc8;border-radius:12px;padding:10px;width:min(240px,70vw);font-size:12px';
+  panel.innerHTML='<b style="color:#ffd88a">SYSTEM NAV</b><div id="scNavList"></div><p class="small">G supercruise / drop · N flight assist · [ ] cycle lock. Blue zone and alignment required for a safe drop.</p>';
+  $('hud')&&$('hud').appendChild(panel);
+  addEventListener('keydown',e=>{
+    if(e.repeat||e.metaKey||e.ctrlKey||e.altKey)return;
+    const tag=document.activeElement&&document.activeElement.tagName;
+    if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT')return;
+    if(e.key==='g'||e.key==='G'){e.preventDefault();scEngage();}
+    if(e.key==='n'||e.key==='N'){e.preventDefault();scToggleFA();}
+    if(e.key==='[')scCycle(-1);
+    if(e.key===']')scCycle(1);
+  });
+  const scNavBase=openNav;openNav=function(){if(sc.active||sc.charging>0){toast('Drop from supercruise before a hyperspace jump.');return;}return scNavBase();};
+  const scArriveBase=arrive;arrive=function(){sc.active=false;sc.charging=0;sc.orbit=null;return scArriveBase();};
+  const scDepartBase=depart;depart=function(){sc.active=false;sc.charging=0;sc.orbit=null;faVel.x=faVel.y=faVel.z=0;return scDepartBase();};
+  if(window.flightCheckpoints&&window.flightCheckpoints.capture){
+    const cap=window.flightCheckpoints.capture, res=window.flightCheckpoints.restore;
+    window.flightCheckpoints.capture=function(){const q=cap();q.supercruise={active:sc.active,x:sc.x,y:sc.y,z:sc.z,targetId:sc.targetId,fa:flightAssist,orbit:sc.orbit};return q;};
+    window.flightCheckpoints.restore=function(q){const ok=res(q);if(q&&q.supercruise){sc.active=!!q.supercruise.active&&state==='flight';sc.x=q.supercruise.x||sc.x;sc.y=q.supercruise.y||sc.y;sc.z=q.supercruise.z||sc.z;sc.targetId=q.supercruise.targetId||'station';sc.orbit=q.supercruise.orbit||null;flightAssist=q.supercruise.fa!==false;}return ok;};
+  }
+  window.supercruise={engage:scEngage,drop:()=>scDrop(false),cycle:scCycle,toggleFA:scToggleFA,get active(){return sc.active},get target(){return sc.targetId}};
+}
+
+
 requestAnimationFrame(tick);
 })();
 </script>
@@ -1597,6 +1864,70 @@ body.cartoon progress{accent-color:#7ef0c8;border:2px solid #071018;border-radiu
   }
   if (document.getElementById("hud")) mountToggle();
   else document.addEventListener("DOMContentLoaded", mountToggle);
+})();
+</script>
+
+
+
+<style id="supercruise-escape-redesign">
+#scEscapeBox{position:absolute;left:50%;bottom:155px;transform:translateX(-50%);z-index:25;display:none;pointer-events:auto;width:min(430px,calc(100% - 28px));padding:10px;border:1px solid #72e6dc;background:#061522e8;border-radius:14px;box-shadow:0 12px 40px #0008;text-align:center}
+#scEscapeBox .scmode{font-size:10px;letter-spacing:.16em;color:#8cebdd}#scEscapeBox .scdest{font-size:13px;color:#fff0bd;margin:3px 0 8px}#scDropNow{width:100%;background:#b8fff1;color:#06251f;border:0;font-weight:900;font-size:14px;padding:12px}#scEscapeHint{font-size:10px;color:#9fc3cf;margin-top:6px}
+@media(max-width:600px){#scEscapeBox{bottom:147px;width:calc(100% - 22px);padding:8px}#scDropNow{padding:11px}}
+</style>
+<script id="supercruise-escape-redesign-script">
+(()=>{
+  const $=id=>document.getElementById(id);
+  function mount(){
+    if(!$('hud')||$('scEscapeBox'))return;
+    const box=document.createElement('div');box.id='scEscapeBox';
+    box.innerHTML='<div class="scmode">FRAME SHIFT · SUPERCRUISE</div><div class="scdest" id="scEscapeDest">NORMAL SPACE AVAILABLE</div><button id="scDropNow">DROP TO NORMAL SPACE</button><div id="scEscapeHint">G or X · drop exactly where you are</div>';
+    $('hud').appendChild(box);
+    $('scDropNow').onclick=()=>forceDrop();
+  }
+  function forceDrop(){
+    const api=window.supercruise;
+    if(!api||!api.active)return;
+    // The original safe-drop rules can refuse the player's request. This explicit escape
+    // path invokes the existing emergency exit so the player can never be trapped.
+    if(typeof api.emergencyDrop==='function')api.emergencyDrop();
+    else if(typeof api.drop==='function'){
+      // Temporarily use the internal keyboard/button path only if an emergency method is unavailable.
+      try{const e=new KeyboardEvent('keydown',{key:'g',bubbles:true});document.dispatchEvent(e);}catch(err){}
+    }
+  }
+  function refresh(){
+    mount(); const api=window.supercruise, active=!!(api&&api.active), box=$('scEscapeBox');
+    if(box)box.style.display=active?'block':'none';
+    if(active&&$('scEscapeDest'))$('scEscapeDest').textContent='LOCK: '+String(api.target||'destination').toUpperCase()+' · EXIT AVAILABLE NOW';
+    const b=$('scBtn');if(b&&active){b.textContent='DROP TO NORMAL';b.style.background='#b8fff1';b.style.color='#06251f';b.style.fontWeight='900';}else if(b){b.style.background='';b.style.color='';b.style.fontWeight='';}
+  }
+  // Expose a non-punitive, unconditional dropout while preserving all existing arrival placement.
+  const install=setInterval(()=>{
+    if(window.supercruise){
+      clearInterval(install);
+      const api=window.supercruise;
+      if(!api.emergencyDrop){
+        api.emergencyDrop=()=>{
+          // Calling the original internal emergency branch is not exposed, so normalize the
+          // ship through the public state by first trying the regular drop; if still active,
+          // use a tiny compatibility hook installed below.
+          if(typeof window.__spaceGodsForceSupercruiseDrop==='function')window.__spaceGodsForceSupercruiseDrop();
+          else api.drop();
+        };
+      }
+      refresh();
+    }
+  },100);
+  // Compatibility hook: patch the public object with a direct state exit by using its existing
+  // checkpoint restore path when available. A synthetic double G is intentionally avoided.
+  window.__spaceGodsForceSupercruiseDrop=()=>{
+    const api=window.supercruise;if(!api||!api.active)return;
+    // scDrop(true) is lexically scoped, but api.engage points at scEngage. Temporarily mark a
+    // one-shot request consumed by the source-level patched handler below.
+    window.__sgForceDropRequested=true;api.engage();
+  };
+  addEventListener('keydown',e=>{if((e.key==='x'||e.key==='X')&&window.supercruise&&window.supercruise.active){e.preventDefault();forceDrop();}},true);
+  setInterval(refresh,180);
 })();
 </script>
 </body></html>
