@@ -2749,4 +2749,634 @@ setTimeout(()=>{chooseEvents();makeOffers();toast('LIVING STATION ONLINE // Traf
 })();
 </script>
 
+
+<style id="sg-part1-flight-mission-style">
+#part1Director{position:absolute;left:16px;top:168px;z-index:8;pointer-events:none;max-width:min(390px,70vw);font:11px/1.35 system-ui;color:#c9f7ef;text-shadow:0 1px 2px #000}
+#part1Director .p1line{display:inline-block;background:#06131dcc;border:1px solid #315768;border-radius:7px;padding:5px 8px;margin:2px 3px 2px 0}
+#part1Director .warn{color:#ffd08a;border-color:#7b5932}
+#part1Director .danger{color:#ff9b91;border-color:#7d3e3e}
+#part1Director .good{color:#9effc7;border-color:#39755b}
+#part1Director:empty{display:none}
+@media(max-width:600px){#part1Director{left:8px;top:145px;max-width:72vw;font-size:10px}}
+</style>
+<script id="sg-part1-flight-mission-overhaul">
+(()=>{
+'use strict';
+if(window.__SG_PART1_DIRECTOR__) return;
+window.__SG_PART1_DIRECTOR__=true;
+
+/* PART 1: mission director + supercruise tuning + tactical subsystems + performance governor */
+const P1={
+  version:1,
+  tick:0,
+  eventClock:0,
+  perfClock:0,
+  lastFrame:performance.now(),
+  fps:60,
+  quality:1,
+  director:null,
+  chain:null,
+  lastContractKey:'',
+  enemySerial:0
+};
+
+const hud=document.createElement('div');
+hud.id='part1Director';
+const hudHost=document.getElementById('hud')||document.body;
+hudHost.appendChild(hud);
+
+function p1Toast(s){ try{toast(s)}catch(e){} }
+function p1Radio(s){ try{radio(s)}catch(e){p1Toast(s)} }
+function liveEnemies(){ try{return pirates.filter(p=>p&&p.hull>0)}catch(e){return[]} }
+function safeDistance(o){ try{return distance(o)}catch(e){return 999999} }
+function contractKey(){
+  const m=save&&save.contract;
+  if(!m)return '';
+  return [m.name||m.title||m.type||'contract',m.system,m.destination,m.reward,m.combatJob,m.goal].join('|');
+}
+function seeded(seed){
+  let x=(seed>>>0)||123456789;
+  return ()=>{x=(x*1664525+1013904223)>>>0;return x/4294967296}
+}
+function hash(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
+function currentContract(){return save&&save.contract||null}
+
+const complications=[
+ {id:'ambush',label:'HOSTILE INTERDICTION',text:'Unregistered contacts have entered the mission corridor.'},
+ {id:'distress',label:'DISTRESS DIVERSION',text:'A damaged civilian craft is transmitting nearby.'},
+ {id:'scan',label:'IDENTITY CHECK',text:'Mission control requires a close-range scan before the objective.'},
+ {id:'reinforce',label:'REINFORCEMENTS',text:'Additional hostile signatures detected behind the primary group.'},
+ {id:'salvage',label:'RECOVERY ORDER',text:'Recover battlefield material before returning to base.'}
+];
+
+function buildDirector(m){
+  if(!m){P1.director=null;P1.chain=null;return}
+  const key=contractKey(), r=seeded(hash(key));
+  let type='standard';
+  if(m.combatJob!==undefined||/bounty|combat|patrol|escort|hunt|pirate/i.test(key))type='combat';
+  else if(/rescue|distress|pilot/i.test(key))type='rescue';
+  else if(/survey|scan|signal|explor/i.test(key))type='survey';
+  else if(/mine|ore|mineral/i.test(key))type='mining';
+  else if(/deliver|courier|cargo|transport/i.test(key))type='delivery';
+  const count=type==='combat'?3:2;
+  const pool=[...complications];
+  const chosen=[];
+  while(chosen.length<count&&pool.length){
+    chosen.push(pool.splice(Math.floor(r()*pool.length),1)[0]);
+  }
+  P1.director={
+    key,type,chosen,
+    stage:0,
+    triggered:{},
+    complete:false,
+    travelTarget:1800+Math.floor(r()*5200),
+    side:r()<.5?-1:1,
+    lastMessage:0
+  };
+  P1.chain={
+    title:type==='combat'?'Operation Broken Spear':
+          type==='rescue'?'Operation Lifeline':
+          type==='survey'?'Operation Far Horizon':
+          type==='mining'?'Operation Iron Reach':'Operation Long Haul',
+    part:1,total:3
+  };
+}
+function ensureDirector(){
+  const m=currentContract(), key=contractKey();
+  if(!m){ if(P1.lastContractKey){P1.lastContractKey='';P1.director=null;P1.chain=null} return }
+  if(key!==P1.lastContractKey){P1.lastContractKey=key;buildDirector(m);p1Radio('MISSION DIRECTOR: '+P1.chain.title+' / stage 1 of 3 initialized.')}
+}
+
+function addPirateAt(x,y,z,name,kind=1){
+  if(typeof pirates==='undefined')return;
+  const p={name:name||('RAIDER '+(++P1.enemySerial)),x,y,z,yaw:0,pitch:0,hull:85,shield:35,color:'#b96359',phase:P1.enemySerial*1.37,fire:1.5+Math.random()*1.5,wanted:true,combatKind:kind};
+  initSubsystems(p);
+  pirates.push(p);
+}
+function spawnInterdiction(n=2){
+  if(typeof ship==='undefined')return;
+  for(let i=0;i<n;i++){
+    const a=(i/n)*Math.PI*2+ship.yaw+1.2;
+    addPirateAt(ship.x+Math.sin(a)*(900+i*180),ship.y+80+(i%2)*100,ship.z+Math.cos(a)*(900+i*180),
+      ['CORSAIR','BLACK NEEDLE','RIFT HOUND','ASH VIPER'][i%4],i%3);
+  }
+  p1Radio('WARNING: interdiction contacts dropped into your flight path.');
+}
+function objectiveRange(){
+  try{return safeDistance(selected())}catch(e){return 99999}
+}
+function directorUpdate(dt){
+  ensureDirector();
+  const d=P1.director,m=currentContract();
+  if(!d||!m||state!=='flight')return;
+  P1.eventClock+=dt;
+  const range=objectiveRange();
+  const farFromBase=safeDistance(station)>900;
+
+  if(!d.triggered.travel && farFromBase && range>2200){
+    d.triggered.travel=true;
+    P1.chain.part=1;
+    p1Radio(P1.chain.title.toUpperCase()+': transit corridor established. Supercruise authorized.');
+  }
+  if(!d.triggered.primary && farFromBase && range<1800){
+    d.triggered.primary=true;
+    P1.chain.part=2;
+    const c=d.chosen[0];
+    if(c){
+      if(c.id==='ambush'||c.id==='reinforce')spawnInterdiction(c.id==='reinforce'?3:2);
+      if(c.id==='scan')p1Radio('MISSION UPDATE: perform a close approach before engaging the primary objective.');
+      if(c.id==='distress')p1Radio('MISSION UPDATE: civilian distress signal overlaps your objective zone.');
+      if(c.id==='salvage')p1Radio('MISSION UPDATE: recovery authorization added. Watch for salvage after contact.');
+    }
+  }
+  if(!d.triggered.twist && d.triggered.primary && P1.eventClock>18 && farFromBase){
+    d.triggered.twist=true;
+    const c=d.chosen[1];
+    if(c){
+      if((c.id==='ambush'||c.id==='reinforce')&&liveEnemies().length<5)spawnInterdiction(c.id==='reinforce'?3:2);
+      else p1Radio('MISSION TWIST: '+c.label+' — '+c.text);
+    }
+  }
+  if(m.ready && !d.triggered.return){
+    d.triggered.return=true;P1.chain.part=3;
+    p1Radio(P1.chain.title.toUpperCase()+': objective complete. Stage 3 — return, dock and claim.');
+  }
+}
+
+function initSubsystems(p){
+  if(!p||p.__p1systems)return;
+  p.__p1systems=true;
+  p.engineHP=100;p.weaponHP=100;p.shieldHP=100;
+  p.retreating=false;p.retreatClock=0;
+  p.originalColor=p.color;
+}
+function tacticalSubsystemUpdate(dt){
+  if(typeof pirates==='undefined')return;
+  for(const p of pirates){
+    if(!p||p.hull<=0)continue;
+    initSubsystems(p);
+    if(p.hull<32&&!p.retreating&&Math.random()<dt*.18){
+      p.retreating=true;p.retreatClock=10;
+      p1Radio('TACTICAL: '+p.name+' is breaking formation and attempting to retreat.');
+    }
+    if(p.retreating){
+      p.retreatClock-=dt;
+      const dx=p.x-ship.x,dz=p.z-ship.z,len=Math.hypot(dx,dz)||1;
+      p.x+=dx/len*dt*180;p.z+=dz/len*dt*180;p.y+=Math.sin(P1.tick*2)*dt*20;
+      p.fire=Math.max(p.fire,.8);
+      if(p.retreatClock<=0||safeDistance(p)>4500){p.hull=0;p.dead=true}
+    }
+    if(p.engineHP<=0){p.disabled=true;p.color='#777f87'}
+    if(p.weaponHP<=0)p.fire=Math.max(p.fire,999);
+    if(p.shieldHP<=0)p.shield=Math.min(p.shield||0,5);
+  }
+}
+
+/* Layer subsystem damage onto the existing tacticalHit without replacing its damage math. */
+if(typeof tacticalHit==='function'){
+  const oldTacticalHit=tacticalHit;
+  tacticalHit=function(b,p,amount){
+    initSubsystems(p);
+    oldTacticalHit(b,p,amount);
+    if(!p||p.hull<=0)return;
+    const roll=Math.random();
+    if(roll<.34)p.engineHP=Math.max(0,p.engineHP-amount*.8);
+    else if(roll<.67)p.weaponHP=Math.max(0,p.weaponHP-amount*.8);
+    else p.shieldHP=Math.max(0,p.shieldHP-amount*.8);
+  };
+}
+
+/* Supercruise: keep the existing C control, but make long travel materially faster and smoother. */
+if(typeof cruiseVelocity==='function'){
+  const oldCruiseVelocity=cruiseVelocity;
+  cruiseVelocity=function(desired){
+    let v=oldCruiseVelocity(desired);
+    if(cruise&&cruiseWarm>=3){
+      const d=objectiveRange();
+      const cap=(typeof capitalVessel==='function'&&capitalVessel())?1750:2350;
+      if(auto){
+        const braking=d<2200?Math.max(260,(d-350)*1.05):cap;
+        v=Math.min(cap,Math.max(v,braking));
+      }else v=Math.max(v,ship.throttle*cap);
+    }
+    return v;
+  };
+}
+
+/* Performance governor: trim transient effects only when frame rate drops. */
+function performanceGovernor(now){
+  const ms=now-P1.lastFrame;P1.lastFrame=now;
+  if(ms>0&&ms<250)P1.fps=P1.fps*.92+(1000/ms)*.08;
+  P1.perfClock+=ms/1000;
+  if(P1.perfClock>2){
+    P1.perfClock=0;
+    P1.quality=P1.fps<38?.55:P1.fps<50?.75:1;
+    try{
+      const maxBolts=P1.quality<.7?55:90,maxBursts=P1.quality<.7?18:35;
+      if(bolts.length>maxBolts)bolts.splice(0,bolts.length-maxBolts);
+      if(bursts.length>maxBursts)bursts.splice(0,bursts.length-maxBursts);
+    }catch(e){}
+  }
+  requestAnimationFrame(performanceGovernor);
+}
+requestAnimationFrame(performanceGovernor);
+
+/* Append director status after the game's own HUD updater. */
+if(typeof updateUI==='function'){
+  const p1BaseUI=updateUI;
+  updateUI=function(){
+    p1BaseUI();
+    const d=P1.director,m=currentContract();
+    if(!d||!m){hud.innerHTML='';return}
+    const c=d.chosen.filter(x=>d.triggered.primary||d.triggered.twist).map(x=>x.label).slice(0,2);
+    const chain=P1.chain?`${P1.chain.title} · ${P1.chain.part}/${P1.chain.total}`:'MISSION';
+    const fps=P1.fps<45?` · PERF ${Math.round(P1.fps)} FPS`:'';
+    hud.innerHTML=`<span class="p1line good">${chain}</span>`+
+      (cruise?`<span class="p1line">SUPERCRUISE ${cruiseWarm<3?'SPOOL':'ACTIVE'}</span>`:'')+
+      c.map(x=>`<span class="p1line ${/HOSTILE|REINFORCE/.test(x)?'danger':'warn'}">${x}</span>`).join('')+
+      (fps?`<span class="p1line warn">${fps.slice(3)}</span>`:'');
+  };
+}
+
+/* Integrate director and tactical behavior into the established update chain. */
+if(typeof update==='function'){
+  const p1BaseUpdate=update;
+  update=function(dt){
+    P1.tick+=dt;
+    p1BaseUpdate(dt);
+    directorUpdate(dt);
+    tacticalSubsystemUpdate(dt);
+  };
+}
+
+/* More useful hostile readout: exposes damaged subsystems and retreat state. */
+if(typeof updateUI==='function'){
+  const p1TacticalUI=updateUI;
+  updateUI=function(){
+    p1TacticalUI();
+    try{
+      if(target==='hostile'){
+        const p=activePirate();
+        if(p){
+          initSubsystems(p);
+          const status=p.retreating?' · RETREATING':p.disabled?' · ENGINES DISABLED':'';
+          $('objective').textContent=`${p.name} · HULL ${Math.max(0,Math.ceil(p.hull))} · SHD ${Math.ceil(p.shield||0)}${status}`;
+          $('bearing').textContent=`ENG ${Math.ceil(p.engineHP)}% · WPN ${Math.ceil(p.weaponHP)}% · SHIELD SYS ${Math.ceil(p.shieldHP)}%`;
+        }
+      }
+    }catch(e){}
+  };
+}
+
+/* Reset director event clock on launch/departure while preserving accepted contract. */
+if(typeof depart==='function'){
+  const p1Depart=depart;
+  depart=function(){
+    P1.eventClock=0;
+    p1Depart();
+    ensureDirector();
+  };
+}
+
+window.spaceGodsPart1={
+  get director(){return P1.director?JSON.parse(JSON.stringify(P1.director)):null},
+  get fps(){return Math.round(P1.fps)},
+  forceComplication(){if(state==='flight')spawnInterdiction(2)}
+};
+ensureDirector();
+})();
+</script>
+
+
+<style id="sg-part2-style">
+#p2ShipBtn{position:absolute;right:16px;top:112px;z-index:12}
+#p2Panel{position:fixed;inset:6% 7%;z-index:110;background:#061019f4;border:1px solid #4a7a89;border-radius:14px;color:#d9f7f3;font:13px/1.35 system-ui;display:none;overflow:auto;padding:16px;box-shadow:0 16px 70px #000}
+#p2Panel.open{display:block}
+#p2Panel h2,#p2Panel h3{margin:4px 0 10px;color:#fff}
+#p2Panel .p2grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
+#p2Panel .card{border:1px solid #294b58;background:#091823;border-radius:10px;padding:10px}
+#p2Panel button{margin:3px;padding:7px 9px;background:#102a38;color:#dff;border:1px solid #426d7d;border-radius:7px;cursor:pointer}
+#p2Panel button.sel{border-color:#d9b35d;color:#ffe5a4}
+#p2Panel button:disabled{opacity:.45;cursor:not-allowed}
+#p2Panel .stat{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #17313c;padding:3px 0}
+#p2Panel .bar{height:5px;background:#142833;border-radius:5px;overflow:hidden;margin:4px 0 7px}.p2fill{height:100%;background:#6ab6c8}
+#p2WingHUD{position:absolute;right:14px;bottom:102px;z-index:8;pointer-events:none;color:#bfeee9;font:10px system-ui;text-align:right;text-shadow:0 1px 2px #000}
+#p2WingHUD span{display:block;background:#06131dcc;border:1px solid #315768;border-radius:6px;padding:4px 7px;margin-top:3px}
+@media(max-width:650px){#p2Panel{inset:3% 3%;padding:10px}#p2ShipBtn{right:8px;top:104px}}
+</style>
+<div id="p2Panel" aria-hidden="true"></div>
+<div id="p2WingHUD"></div>
+<script id="sg-part2-ships-wingmen">
+(()=>{
+'use strict';
+if(window.__SG_PART2__)return; window.__SG_PART2__=true;
+const KEY='spaceGods.part2.shipProgress.v1';
+const defaults={
+ creditsSpent:0,shipClass:'interceptor',
+ modules:{engine:1,shield:1,reactor:1,armor:1,weapons:1,cargo:1,scanner:1,jump:1,utility:1},
+ wingmen:{},
+ activeWingmen:[],
+ wingCommand:'FOLLOW'
+};
+let P2;
+try{P2=Object.assign({},defaults,JSON.parse(localStorage.getItem(KEY)||'{}'));P2.modules=Object.assign({},defaults.modules,P2.modules||{});P2.wingmen=P2.wingmen||{};P2.activeWingmen=P2.activeWingmen||[]}catch(e){P2=JSON.parse(JSON.stringify(defaults))}
+function store(){try{localStorage.setItem(KEY,JSON.stringify(P2))}catch(e){}}
+const classes={
+ interceptor:{name:'Aegis Interceptor',cost:0,speed:1.18,turn:1.18,hull:.82,shield:.88,cargo:.65,jump:1.08,desc:'Fast combat craft. Sharp handling, lighter hull.'},
+ explorer:{name:'Wayfarer Explorer',cost:18000,speed:1.03,turn:1.02,hull:.95,shield:1.0,cargo:1.0,jump:1.30,desc:'Long-range scanner and jump specialist.'},
+ hauler:{name:'Atlas Hauler',cost:24000,speed:.82,turn:.78,hull:1.22,shield:1.08,cargo:1.85,jump:.92,desc:'Heavy cargo frame with strong armor.'},
+ gunship:{name:'Valkyrie Gunship',cost:36000,speed:.91,turn:.86,hull:1.42,shield:1.35,cargo:.78,jump:.88,desc:'Slow, heavily protected weapons platform.'},
+ dreadnought:{name:'Gods Dreadnought',cost:90000,speed:.58,turn:.52,hull:2.45,shield:2.10,cargo:1.55,jump:.72,desc:'Capital-scale flagship. Massive protection and capacity.'}
+};
+const moduleInfo={
+ engine:['Engine Core',2600,'Speed / acceleration'],
+ shield:['Shield Matrix',3000,'Shield capacity / recovery'],
+ reactor:['Power Plant',3400,'Energy reserve / recharge'],
+ armor:['Composite Armor',2800,'Hull strength'],
+ weapons:['Weapons Array',3600,'Weapon damage / cooling'],
+ cargo:['Cargo Racks',2200,'Cargo capacity'],
+ scanner:['Sensor Suite',2400,'Scanner reach / target acquisition'],
+ jump:['Frame Shift Drive',3800,'Supercruise / jump performance'],
+ utility:['Utility Bay',2500,'Repair and defensive efficiency']
+};
+const pilots={
+ nova:{name:'Nova Reyes',role:'Interceptor',cost:8000,skill:1.12,ship:'Wasp',desc:'Aggressive combat pilot.'},
+ rook:{name:'Rook Mercer',role:'Guardian',cost:9000,skill:1.18,ship:'Bulwark',desc:'Excels at defending your ship.'},
+ echo:{name:'Echo Vale',role:'Scout',cost:7500,skill:1.08,ship:'Kestrel',desc:'Fast scout and salvage support.'}
+};
+function credits(){return Number(save&&save.credits||0)}
+function spend(n){if(credits()<n)return false;save.credits-=n;try{persist()}catch(e){}return true}
+function cls(){return classes[P2.shipClass]||classes.interceptor}
+function lvl(k){return Math.max(1,Math.min(5,Number(P2.modules[k]||1)))}
+function mult(k,step=.1){return 1+(lvl(k)-1)*step}
+function upgradeCost(k){return Math.round(moduleInfo[k][1]*Math.pow(1.55,lvl(k)-1))}
+function derived(){
+ const c=cls();
+ return {
+  speed:c.speed*mult('engine',.105),
+  turn:c.turn*mult('engine',.07),
+  hull:c.hull*mult('armor',.14),
+  shield:c.shield*mult('shield',.14),
+  power:mult('reactor',.15),
+  damage:mult('weapons',.13),
+  cargo:c.cargo*mult('cargo',.22),
+  scan:mult('scanner',.18),
+  jump:c.jump*mult('jump',.12),
+  utility:mult('utility',.12)
+ };
+}
+function applyStats(){
+ const d=derived();
+ try{
+   ship.p2Class=P2.shipClass; ship.p2Stats=d;
+   ship.maxHull=Math.round(100*d.hull); ship.maxShield=Math.round(100*d.shield);
+   if(ship.hull>ship.maxHull)ship.hull=ship.maxHull;
+   if(ship.shield>ship.maxShield)ship.shield=ship.maxShield;
+ }catch(e){}
+}
+function openPanel(){renderPanel();const p=document.getElementById('p2Panel');p.classList.add('open');p.setAttribute('aria-hidden','false');}
+function closePanel(){const p=document.getElementById('p2Panel');p.classList.remove('open');p.setAttribute('aria-hidden','true')}
+function renderPanel(){
+ const d=derived(),c=cls();
+ const classCards=Object.entries(classes).map(([id,x])=>`<div class="card"><h3>${x.name}</h3><div>${x.desc}</div><div>Speed ${Math.round(x.speed*100)} · Hull ${Math.round(x.hull*100)} · Cargo ${Math.round(x.cargo*100)}</div><button data-class="${id}" ${id===P2.shipClass?'class="sel"':''}>${id===P2.shipClass?'ACTIVE SHIP':(x.cost?`BUY / SWITCH · ${x.cost.toLocaleString()} CR`:'SWITCH')}</button></div>`).join('');
+ const mods=Object.entries(moduleInfo).map(([k,x])=>{const l=lvl(k),cost=upgradeCost(k);return `<div class="card"><b>${x[0]} · Mk ${l}</b><div>${x[2]}</div><div class="bar"><div class="p2fill" style="width:${l*20}%"></div></div><button data-up="${k}" ${l>=5?'disabled':''}>${l>=5?'MAXIMUM':`UPGRADE · ${cost.toLocaleString()} CR`}</button></div>`}).join('');
+ const wings=Object.entries(pilots).map(([id,p])=>{const owned=!!P2.wingmen[id],active=P2.activeWingmen.includes(id);return `<div class="card"><h3>${p.name}</h3><div>${p.role} · ${p.ship}</div><div>${p.desc}</div>${owned?`<button data-wing="${id}" class="${active?'sel':''}">${active?'DISMISS':'SUMMON'}</button>`:`<button data-recruit="${id}">RECRUIT · ${p.cost.toLocaleString()} CR</button>`}</div>`}).join('');
+ document.getElementById('p2Panel').innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2>GODS SHIPWORKS // FLEET & LOADOUT</h2><button id="p2Close">CLOSE</button></div>
+ <div class="card"><div class="stat"><b>${c.name}</b><span>${credits().toLocaleString()} CR</span></div><div class="stat"><span>Speed</span><b>${Math.round(d.speed*100)}%</b></div><div class="stat"><span>Hull</span><b>${Math.round(d.hull*100)}%</b></div><div class="stat"><span>Shield</span><b>${Math.round(d.shield*100)}%</b></div><div class="stat"><span>Damage</span><b>${Math.round(d.damage*100)}%</b></div><div class="stat"><span>Jump</span><b>${Math.round(d.jump*100)}%</b></div></div>
+ <h3>SHIP CLASSES</h3><div class="p2grid">${classCards}</div><h3>MODULE LOADOUT</h3><div class="p2grid">${mods}</div><h3>WINGMEN</h3><div class="p2grid">${wings}</div>
+ <h3>WING COMMAND</h3><div class="card">${['FOLLOW','ATTACK TARGET','DEFEND ME','HOLD','COLLECT CARGO','RETURN TO BASE'].map(x=>`<button data-command="${x}" class="${P2.wingCommand===x?'sel':''}">${x}</button>`).join('')}</div>`;
+ document.getElementById('p2Close').onclick=closePanel;
+ document.querySelectorAll('[data-class]').forEach(b=>b.onclick=()=>{const id=b.dataset.class,x=classes[id];if(id!==P2.shipClass&&x.cost&&!spend(x.cost))return p2msg('INSUFFICIENT CREDITS');P2.shipClass=id;store();applyStats();p2msg(x.name+' selected.');renderPanel()});
+ document.querySelectorAll('[data-up]').forEach(b=>b.onclick=()=>{const k=b.dataset.up;if(lvl(k)>=5)return;const cost=upgradeCost(k);if(!spend(cost))return p2msg('INSUFFICIENT CREDITS');P2.modules[k]++;store();applyStats();p2msg(moduleInfo[k][0]+' upgraded to Mk '+lvl(k));renderPanel()});
+ document.querySelectorAll('[data-recruit]').forEach(b=>b.onclick=()=>{const id=b.dataset.recruit,p=pilots[id];if(!spend(p.cost))return p2msg('INSUFFICIENT CREDITS');P2.wingmen[id]=true;store();p2msg(p.name+' joined your roster.');renderPanel()});
+ document.querySelectorAll('[data-wing]').forEach(b=>b.onclick=()=>{const id=b.dataset.wing;if(P2.activeWingmen.includes(id))P2.activeWingmen=P2.activeWingmen.filter(x=>x!==id);else if(P2.activeWingmen.length<3)P2.activeWingmen.push(id);else return p2msg('Maximum three active wingmen.');store();renderPanel()});
+ document.querySelectorAll('[data-command]').forEach(b=>b.onclick=()=>{P2.wingCommand=b.dataset.command;store();p2msg('Wing command: '+P2.wingCommand);renderPanel()});
+}
+function p2msg(s){try{radio(s)}catch(e){try{toast(s)}catch(e){}}}
+const btn=document.createElement('button');btn.id='p2ShipBtn';btn.className='mini';btn.textContent='SHIP / WING';btn.onclick=openPanel;(document.getElementById('hud')||document.body).appendChild(btn);
+
+/* Integrate ship class/module effects into established movement and damage functions where available. */
+if(typeof cruiseVelocity==='function'){
+ const baseCruise=cruiseVelocity;
+ cruiseVelocity=function(desired){const d=derived();return baseCruise(desired)*d.speed*d.jump}
+}
+if(typeof tacticalHit==='function'){
+ const baseHit=tacticalHit;
+ tacticalHit=function(b,p,amount){return baseHit(b,p,amount*derived().damage)}
+}
+if(typeof hitPlayer==='function'){
+ const basePlayerHit=hitPlayer;
+ hitPlayer=function(amount){return basePlayerHit(amount/Math.max(.55,derived().hull))}
+}
+if(typeof scanTarget==='function'){
+ const baseScan=scanTarget;
+ scanTarget=function(){const r=baseScan();try{scanProgress=Math.min(100,scanProgress+(derived().scan-1)*10)}catch(e){}return r}
+}
+
+/* Wingmen are deliberately lightweight: simple positions/commands, no second expensive AI engine. */
+const wingObjects={};
+function ensureWing(id,index){
+ if(wingObjects[id])return wingObjects[id];
+ const p=pilots[id],o={id,name:p.name,ship:p.ship,x:ship.x,y:ship.y,z:ship.z,hull:100,phase:index*2.1};
+ wingObjects[id]=o;return o;
+}
+function wingUpdate(dt){
+ if(typeof ship==='undefined'||state!=='flight')return;
+ P2.activeWingmen.forEach((id,i)=>{
+   const w=ensureWing(id,i),p=pilots[id]; let tx=ship.x+(i-1)*130,tz=ship.z-190-i*55,ty=ship.y+45+i*20;
+   if(P2.wingCommand==='HOLD'){tx=w.holdX??(w.holdX=w.x);ty=w.holdY??(w.holdY=w.y);tz=w.holdZ??(w.holdZ=w.z)}
+   else {delete w.holdX;delete w.holdY;delete w.holdZ}
+   if(P2.wingCommand==='ATTACK TARGET'){
+     try{const e=activePirate();if(e&&e.hull>0){tx=e.x+(i-1)*90;ty=e.y+50;tz=e.z+120;if(distance(w)<1500&&Math.random()<dt*.7*p.skill){e.hull-=4.5*p.skill*derived().damage;if(e.hull<=0)e.dead=true}}}catch(e){}
+   }else if(P2.wingCommand==='DEFEND ME'){
+     try{let es=pirates.filter(e=>e.hull>0).sort((a,b)=>distance(a)-distance(b));if(es[0]&&distance(es[0])<1200){tx=es[0].x;ty=es[0].y;tz=es[0].z;if(Math.random()<dt*.55*p.skill)es[0].hull-=3.8*p.skill}}catch(e){}
+   }else if(P2.wingCommand==='RETURN TO BASE'){
+     try{tx=station.x+(i-1)*90;ty=station.y+80;tz=station.z-240}catch(e){}
+   }else if(P2.wingCommand==='COLLECT CARGO'){
+     try{const s=salvage.find(x=>!x.collected);if(s){tx=s.x;ty=s.y;tz=s.z;if(Math.hypot(w.x-s.x,w.y-s.y,w.z-s.z)<100){s.collected=true;save.credits=(save.credits||0)+120;p2msg(w.name+' recovered salvage.')}}}catch(e){}
+   }
+   const k=Math.min(1,dt*(1.8+p.skill));w.x+=(tx-w.x)*k;w.y+=(ty-w.y)*k;w.z+=(tz-w.z)*k;
+ });
+}
+function wingDraw(){
+ if(typeof project!=='function'||state!=='flight')return;
+ const ctx=window.ctx||document.getElementById('world')?.getContext('2d');if(!ctx)return;
+ for(const id of P2.activeWingmen){const w=wingObjects[id];if(!w)continue;const q=project(w.x,w.y,w.z);if(!q||q.z<=0)continue;const s=Math.max(3,Math.min(12,800/q.z));ctx.save();ctx.translate(q.x,q.y);ctx.strokeStyle='#80d8e8';ctx.fillStyle='#173946';ctx.beginPath();ctx.moveTo(0,-s);ctx.lineTo(s*.8,s);ctx.lineTo(0,s*.55);ctx.lineTo(-s*.8,s);ctx.closePath();ctx.fill();ctx.stroke();ctx.restore()}
+}
+if(typeof update==='function'){const u=update;update=function(dt){u(dt);wingUpdate(dt)}}
+if(typeof render==='function'){const r=render;render=function(){r();wingDraw()}}
+
+/* HUD and keyboard command shortcuts. */
+const wingHud=document.getElementById('p2WingHUD');
+if(typeof updateUI==='function'){const ui=updateUI;updateUI=function(){ui();applyStats();wingHud.innerHTML=P2.activeWingmen.map(id=>`<span>${pilots[id].name} · ${P2.wingCommand}</span>`).join('')}}
+document.addEventListener('keydown',e=>{if(e.repeat||/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName||''))return;if(e.key.toLowerCase()==='k')openPanel();if(e.key==='Escape'&&document.getElementById('p2Panel').classList.contains('open')){closePanel();e.stopPropagation()}});
+applyStats();
+window.spaceGodsPart2={state:P2,derived,open:openPanel};
+})();
+</script>
+
+
+<style id="sg-part3-style">
+#p3ExploreBtn{position:absolute;right:16px;top:150px;z-index:12}
+#p3Universe{position:fixed;inset:5% 6%;z-index:115;display:none;overflow:auto;padding:16px;border:1px solid #4a7889;border-radius:14px;background:#050d16f5;color:#d9f7f3;font:12px/1.4 system-ui;box-shadow:0 18px 70px #000}
+#p3Universe.open{display:block}
+#p3Universe h2,#p3Universe h3{margin:5px 0 10px;color:#fff}
+#p3Universe .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+#p3Universe .card{border:1px solid #294b58;border-radius:10px;background:#091823;padding:10px}
+#p3Universe button{margin:3px;padding:7px 9px;border:1px solid #426d7d;border-radius:7px;background:#102a38;color:#dff;cursor:pointer}
+#p3Universe button.sel{border-color:#e0b45c;color:#ffe3a0}
+#p3SignalHUD{position:absolute;left:16px;bottom:104px;z-index:8;max-width:330px;pointer-events:none;color:#bfeee9;font:10px system-ui;text-shadow:0 1px 2px #000}
+#p3SignalHUD span{display:block;background:#06131ddd;border:1px solid #315768;border-radius:6px;padding:4px 7px;margin-top:3px}
+#p3RadioLog{max-height:150px;overflow:auto;font-size:11px}
+@media(max-width:650px){#p3Universe{inset:3%;padding:10px}#p3ExploreBtn{right:8px;top:142px}#p3SignalHUD{left:8px;bottom:96px;max-width:58vw}}
+</style>
+<div id="p3Universe" aria-hidden="true"></div>
+<div id="p3SignalHUD"></div>
+<script id="sg-part3-living-galaxy">
+(()=>{
+'use strict';
+if(window.__SG_PART3__)return; window.__SG_PART3__=true;
+const KEY='spaceGods.part3.universe.v1';
+let U={discoveries:{},route:null,signals:[],radio:[],lastEvent:0,lastSignal:0,seed:71391};
+try{U=Object.assign(U,JSON.parse(localStorage.getItem(KEY)||'{}'))}catch(e){}
+function store(){try{localStorage.setItem(KEY,JSON.stringify(U))}catch(e){}}
+function msg(s){try{radio(s)}catch(e){try{toast(s)}catch(e){}}}
+function addRadio(s){U.radio.unshift({t:Date.now(),s});U.radio=U.radio.slice(0,18);store();msg(s)}
+function hash(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
+function rng(seed){let x=seed>>>0;return()=>{x=(Math.imul(x,1664525)+1013904223)>>>0;return x/4294967296}}
+const econ=['Industrial','Extraction','High Tech','Agricultural','Military','Service','Refinery'];
+const threat=['LOW','GUARDED','ELEVATED','HIGH','ANARCHIC'];
+function systemInfo(i){
+ const s=systems[i]||{name:'Unknown'};
+ const r=rng(hash((s.name||i)+'-p3'));
+ return {economy:econ[Math.floor(r()*econ.length)],threat:threat[Math.floor(r()*threat.length)],population:(.4+r()*8.8).toFixed(1)+'B',security:['Civil','Federal','Corporate','Military'][Math.floor(r()*4)],signals:1+Math.floor(r()*5)};
+}
+const signalKinds=[
+ ['DERELICT','Abandoned vessel drifting without power.'],
+ ['WRECK FIELD','Multiple destroyed ships and recoverable debris.'],
+ ['UNKNOWN ANOMALY','Unclassified energy distortion.'],
+ ['DISTRESS CALL','Weak emergency transmission.'],
+ ['SMUGGLER CACHE','Encrypted cargo beacon.'],
+ ['BLACK BOX','Flight recorder signal from a lost ship.'],
+ ['MINERAL CLUSTER','Uncatalogued high-density asteroid pocket.']
+];
+function createSignal(force=false){
+ if(state!=='flight'||typeof ship==='undefined')return;
+ if(U.signals.filter(x=>!x.done&&x.system===save.system).length>=3&&!force)return;
+ const r=rng((Date.now()>>>9)^hash(String(save.system)));
+ const k=signalKinds[Math.floor(r()*signalKinds.length)];
+ const a=r()*Math.PI*2,d=2400+r()*6500;
+ U.signals.push({id:'SIG-'+Date.now().toString(36),kind:k[0],desc:k[1],system:save.system,x:ship.x+Math.sin(a)*d,y:ship.y+(r()-.5)*900,z:ship.z+Math.cos(a)*d,done:false,reward:350+Math.floor(r()*1500)});
+ U.signals=U.signals.slice(-18);store();
+ addRadio('NAV: new '+k[0]+' signal detected in '+systems[save.system].name+'.');
+}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z)}
+function nearestSignal(){
+ const arr=U.signals.filter(x=>!x.done&&x.system===save.system);if(!arr.length)return null;
+ return arr.sort((a,b)=>dist(ship,a)-dist(ship,b))[0];
+}
+function discover(s){
+ if(!s||s.done)return;s.done=true;
+ const key=systems[s.system].name+' / '+s.kind;
+ U.discoveries[key]=(U.discoveries[key]||0)+1;
+ save.credits=(save.credits||0)+s.reward;
+ try{persist()}catch(e){}
+ addRadio('DISCOVERY LOGGED: '+s.kind+' · '+s.reward+' CR exploration award.');
+ store();
+}
+function signalUpdate(dt){
+ if(state!=='flight')return;
+ U.lastSignal+=dt;U.lastEvent+=dt;
+ if(U.lastSignal>75){U.lastSignal=0;if(Math.random()<.55)createSignal()}
+ const s=nearestSignal();
+ if(s&&dist(ship,s)<150)discover(s);
+ if(U.lastEvent>55){
+   U.lastEvent=0;
+   const events=[
+    'SECURITY: routine patrol launching from Gods Base.',
+    'TRAFFIC: heavy freighter cleared for docking corridor.',
+    'CONTROL: civilian shuttle traffic crossing local approach lane.',
+    'NAV: transient frame-shift wake detected beyond the perimeter.',
+    'SECURITY: all pilots, submit transponder identification on approach.',
+    'SHIPWORKS: construction tug departing fabrication berth.',
+    'CONTROL: docking traffic is moderate. Maintain assigned vector.'
+   ];
+   if(Math.random()<.7)addRadio(events[Math.floor(Math.random()*events.length)]);
+ }
+}
+function signalDraw(){
+ if(state!=='flight'||typeof project!=='function')return;
+ const c=window.ctx||document.getElementById('world')?.getContext('2d');if(!c)return;
+ for(const s of U.signals){
+   if(s.done||s.system!==save.system)continue;
+   const q=project(s.x,s.y,s.z);if(!q||q.z<=0)continue;
+   const dd=Math.round(dist(ship,s));
+   c.save();c.strokeStyle='#d8bd6c';c.fillStyle='#f4dda0';c.globalAlpha=.9;
+   c.beginPath();c.arc(q.x,q.y,7,0,Math.PI*2);c.stroke();
+   c.beginPath();c.moveTo(q.x-11,q.y);c.lineTo(q.x+11,q.y);c.moveTo(q.x,q.y-11);c.lineTo(q.x,q.y+11);c.stroke();
+   c.font='10px system-ui';c.textAlign='center';c.fillText(s.kind+' · '+dd+'m',q.x,q.y+23);c.restore();
+ }
+}
+function routeTo(i){
+ if(i===save.system){U.route=null;store();return msg('Already in '+systems[i].name+'.')}
+ U.route={from:save.system,to:i,plotted:Date.now()};store();
+ msg('ROUTE PLOTTED: '+systems[save.system].name+' → '+systems[i].name);
+}
+function executeRoute(){
+ if(!U.route)return msg('No route plotted.');
+ try{
+   if(typeof jumpTo==='function')return jumpTo(U.route.to);
+   if(typeof doJump==='function')return doJump(U.route.to);
+   if(typeof jump==='function')return jump(U.route.to);
+ }catch(e){}
+ msg('Use the existing Jump control. Destination is '+systems[U.route.to].name+'.');
+}
+function openUniverse(){renderUniverse();const p=document.getElementById('p3Universe');p.classList.add('open');p.setAttribute('aria-hidden','false')}
+function closeUniverse(){const p=document.getElementById('p3Universe');p.classList.remove('open');p.setAttribute('aria-hidden','true')}
+function renderUniverse(){
+ const sysCards=systems.map((s,i)=>{const inf=systemInfo(i),disc=Object.entries(U.discoveries).filter(([k])=>k.startsWith(s.name+' / ')).reduce((n,[k,v])=>n+v,0);return `<div class="card"><h3>${s.name}${i===save.system?' · CURRENT':''}</h3><div>Economy: <b>${inf.economy}</b></div><div>Threat: <b>${inf.threat}</b></div><div>Population: ${inf.population}</div><div>Security: ${inf.security}</div><div>Discoveries: ${disc}</div><button data-route="${i}" class="${U.route&&U.route.to===i?'sel':''}">${i===save.system?'CURRENT SYSTEM':'PLOT ROUTE'}</button></div>`}).join('');
+ const sig=U.signals.filter(x=>!x.done).slice(-8).map(s=>`<div class="card"><b>${s.kind}</b><div>${systems[s.system]?.name||'Unknown'} · ${s.desc}</div><div>${s.reward} CR discovery value</div></div>`).join('')||'<div class="card">No unresolved signals logged.</div>';
+ const logs=U.radio.slice(0,12).map(x=>`<div>${new Date(x.t).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})} · ${x.s}</div>`).join('')||'No traffic reports yet.';
+ document.getElementById('p3Universe').innerHTML=`<div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><h2>GALAXY INTELLIGENCE // EXPLORATION</h2><button id="p3Close">CLOSE</button></div>
+ <div class="card"><b>ACTIVE ROUTE:</b> ${U.route?`${systems[U.route.from]?.name||'?'} → ${systems[U.route.to]?.name||'?'}`:'NONE'} <button id="p3Execute">EXECUTE / OPEN JUMP</button><button id="p3Ping">LONG-RANGE SIGNAL SCAN</button></div>
+ <h3>KNOWN SYSTEMS</h3><div class="grid">${sysCards}</div><h3>UNRESOLVED SIGNALS</h3><div class="grid">${sig}</div><h3>STATION / SECURITY RADIO</h3><div id="p3RadioLog" class="card">${logs}</div>`;
+ document.getElementById('p3Close').onclick=closeUniverse;
+ document.getElementById('p3Execute').onclick=executeRoute;
+ document.getElementById('p3Ping').onclick=()=>{createSignal(true);renderUniverse()};
+ document.querySelectorAll('[data-route]').forEach(b=>b.onclick=()=>{routeTo(+b.dataset.route);renderUniverse()});
+}
+const btn=document.createElement('button');btn.id='p3ExploreBtn';btn.className='mini';btn.textContent='GALAXY / EXPLORE';btn.onclick=openUniverse;(document.getElementById('hud')||document.body).appendChild(btn);
+const sigHud=document.getElementById('p3SignalHUD');
+function updateSignalHud(){
+ if(state!=='flight'){sigHud.innerHTML='';return}
+ const s=nearestSignal();let bits=[];
+ if(U.route)bits.push(`<span>ROUTE → ${systems[U.route.to]?.name||'UNKNOWN'}</span>`);
+ if(s)bits.push(`<span>UNKNOWN SIGNAL · ${s.kind} · ${Math.round(dist(ship,s))}m</span>`);
+ sigHud.innerHTML=bits.join('');
+}
+
+/* Hook into existing game loops. */
+if(typeof update==='function'){const u=update;update=function(dt){u(dt);signalUpdate(dt)}}
+if(typeof render==='function'){const r=render;render=function(){r();signalDraw()}}
+if(typeof updateUI==='function'){const ui=updateUI;updateUI=function(){ui();updateSignalHud()}}
+
+/* Performance cleanup: cap exploration history and reduce stale transient arrays. */
+let perfTimer=0;
+if(typeof update==='function'){
+ const u2=update;
+ update=function(dt){
+   u2(dt);perfTimer+=dt;
+   if(perfTimer>8){perfTimer=0;
+     U.signals=U.signals.filter(x=>!x.done||Date.now()-Number(x.id.split('-')[1]||0)<1800000).slice(-18);
+     try{if(bolts.length>100)bolts.splice(0,bolts.length-100);if(bursts.length>40)bursts.splice(0,bursts.length-40)}catch(e){}
+     store();
+   }
+ }
+}
+document.addEventListener('keydown',e=>{if(e.repeat||/INPUT|TEXTAREA|SELECT/.test(e.target?.tagName||''))return;if(e.key.toLowerCase()==='g')openUniverse();if(e.key==='Escape'&&document.getElementById('p3Universe').classList.contains('open')){closeUniverse();e.stopPropagation()}});
+if(!U.radio.length)addRadio('GALAXY CONTROL: exploration network online. Unknown signals may appear during normal flight.');
+window.spaceGodsPart3={state:U,open:openUniverse,scan:()=>createSignal(true)};
+})();
+</script>
+
 </body></html>
