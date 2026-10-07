@@ -228,6 +228,25 @@ function segment(a,b,color,lw=1){const aa=worldPoint(...a),bb=worldPoint(...b);i
 function clipWorldPolygon(vs){let pts=vs.map(v=>camera(...v)),out=[];for(let i=0;i<pts.length;i++){const a=pts[i],b=pts[(i+1)%pts.length],aa=a.z>=5,bb=b.z>=5;if(aa)out.push(a);if(aa!==bb){const t=(5-a.z)/(b.z-a.z);out.push({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,z:5})}}return out.map(project)}
 function worldPolygon(vs,fill,stroke='#769ab42a'){const ps=clipWorldPolygon(vs);if(ps.length<3)return;ctx.beginPath();ps.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.fillStyle=fill;ctx.fill();if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=1;ctx.stroke()}}
 function stationDraw(){
+/* GODS BASE TRAFFIC ONLY — lightweight activity around the existing station. */
+const isGodsBase=(save.system===0 || /gods base/i.test(String(currentSystem().station||'')));
+if(isGodsBase){
+ const BX=station.x,BY=station.y,BZ=station.z;
+ function trafficBox(x,y,z,w,h,d,fill,edge='#d1edf2'){
+  const X=w/2,Y=h/2,Z=d/2,v=[[x-X,y-Y,z-Z],[x+X,y-Y,z-Z],[x+X,y+Y,z-Z],[x-X,y+Y,z-Z],[x-X,y-Y,z+Z],[x+X,y-Y,z+Z],[x+X,y+Y,z+Z],[x-X,y+Y,z+Z]];
+  const fs=[[0,1,2,3],[4,7,6,5],[0,4,5,1],[3,2,6,7],[0,3,7,4],[1,5,6,2]];
+  fs.map(f=>({f,z:f.reduce((q,i)=>q+camera(...v[i]).z,0)/4})).sort((a,b)=>b.z-a.z).forEach(o=>worldPolygon(o.f.map(i=>v[i]),fill,edge));
+ }
+ function trafficLamp(x,y,z,c='#70f5ff'){const p=worldPoint(x,y,z);if(!p)return;const q=Math.max(1.2,Math.min(4,2.5*focal/p.z));ctx.save();ctx.shadowColor=c;ctx.shadowBlur=6;ellipse(p.x,p.y,q,q,c);ctx.restore()}
+ // Twelve low-cost craft on three broad lanes around Gods Base. No city geometry.
+ for(let i=0;i<12;i++){
+  const lane=i%3,a=time*(.075+lane*.018)+i*.91,rr=360+lane*155;
+  const xx=BX+Math.cos(a)*rr,zz=BZ+Math.sin(a)*rr*.72+(lane-1)*100,yy=BY-40+(lane-1)*105+Math.sin(a*1.7+i)*28;
+  const freighter=i%6===0,patrol=i%4===0;
+  trafficBox(xx,yy,zz,freighter?46:patrol?30:22,freighter?12:8,freighter?86:patrol?58:42,freighter?'#a9855b':patrol?'#657f9b':'#7897a6');
+  trafficLamp(xx,yy,zz-26,patrol?'#ffcf67':'#70f5ff');
+ }
+}
 const faces=[],cx=station.x,cy=station.y,cz=station.z,segments=regionStyles[save.system].sides;
 function v(a,r,z){return[cx+Math.cos(a)*r,cy+Math.sin(a)*r,cz+z]}
 function add(vs,fill,stroke){faces.push({vs,fill,stroke,z:vs.reduce((sum,v)=>sum+camera(...v).z,0)/vs.length})}
@@ -2382,6 +2401,7 @@ body.sg-menu-open #hud{filter:brightness(.65)}
    <button data-sg="missions" class="primary"><b>MISSIONS</b><span>Contracts, active objective, rewards and launch</span></button>
    <button data-sg="nav"><b>GALAXY / JUMP</b><span>Destination map and route home</span></button>
    <button data-sg="command"><b>COMMAND CENTER</b><span>Gods Base operations and command network</span></button>
+   <button data-sg="districts"><b>STATION DISTRICTS</b><span>Fly to Shipworks, Cargo, Security, Refinery, Comms and Civilian Service</span></button>
    <button data-sg="dock"><b>DOCKING</b><span>Request clearance, land, station services</span></button>
    <button data-sg="shipworks"><b>GODS SHIPWORKS</b><span>Design, construct and select vessels</span></button>
    <button data-sg="galaxy"><b>LIVING GALAXY</b><span>Encounters, wingmen, factions and sector events</span></button>
@@ -2413,6 +2433,7 @@ body.sg-menu-open #hud{filter:brightness(.65)}
    if(kind==='shipworks'){const b=$('freshSWAccess')||buttonText('SHIPWORKS');if(b)b.click();return}
    if(kind==='galaxy'){const b=$('lgAccess')||buttonText('LIVING','GALAXY');if(b)b.click();return}
    if(kind==='command'){clickId('openCommand')||clickId('commandCenter')||buttonText('COMMAND','CENTER')?.click();return}
+   if(kind==='districts'){window.SGStationDistricts?.open();return}
    if(kind==='academy'){buttonText('PILOT','ACADEMY')?.click();return}
    if(kind==='city'){(buttonText('CITY','SIM')||buttonText('CITY','STATION'))?.click();return}
    if(kind==='missions'){
@@ -2442,4 +2463,290 @@ body.sg-menu-open #hud{filter:brightness(.65)}
  new MutationObserver(()=>{if(oldToggle&&!document.body.contains(oldToggle))document.body.appendChild(oldToggle)}).observe(document.body,{childList:true,subtree:true});
 })();
 </script>
+<script id="sg-mission-variety-pass">
+(()=>{
+'use strict';
+if(window.__SG_MISSION_VARIETY__)return; window.__SG_MISSION_VARIETY__=true;
+const profiles={
+ rescue:[[-2100,260,1750],[2450,-180,900],[-900,520,2850],[1700,380,-2350],[-2750,-320,-1450],[800,-520,3400]],
+ survey:[[3200,700,900],[-2800,1050,1850],[1100,-850,3650],[-3500,250,-700],[2600,-650,-2100],[-700,1250,-3200]],
+ mining:[[1850,-300,3300],[-2400,420,2750],[3300,150,-1200],[-3100,-500,-2100],[650,800,3900],[2900,-700,2100]],
+ bounty:[[2700,300,2300],[-3200,650,1400],[1600,-450,-3400],[-2500,-700,-2600],[3600,500,-400],[-500,950,3700]]
+};
+let serial=0;
+function hash(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
+function currentKey(){const m=save.contract;if(!m)return '';return [m.pilotTitle||'',m.type,m.source,m.dest,m.reward,m.goal,save.completed,serial].join('|')}
+function ensureProfile(force=false){const m=save.contract;if(!m||m.ready)return null;if(!force&&m.sgRoute&&m.sgRoute.system===save.system)return m.sgRoute;const list=profiles[m.type]||profiles.rescue;const seed=hash(currentKey()+'|'+Date.now());const base=list[seed%list.length],scale=.82+((seed>>>5)%55)/100;const twist=((seed>>>11)%900)-450;const route={system:save.system,index:seed%list.length,x:station.x+base[0]*scale,y:station.y+base[1],z:station.z+base[2]*scale,twist,variant:(seed>>>17)%4};m.sgRoute=route;applyProfile(route);return route}
+function applyProfile(r){const m=save.contract;if(!m||!r||m.ready)return;
+ if(m.type==='rescue'){pod.x=r.x;pod.y=r.y;pod.z=r.z;podRoute='pod';carrying=false}
+ if(m.type==='survey'){surveyBeacon.x=r.x;surveyBeacon.y=r.y;surveyBeacon.z=r.z;surveyProgress=0}
+ if(m.type==='mining'){
+   for(let i=0;i<mineralRocks.length;i++){const a=i*.93+r.variant*.41,ring=170+i*95;mineralRocks[i].x=r.x+Math.cos(a)*ring;mineralRocks[i].y=r.y+((i%3)-1)*95;mineralRocks[i].z=r.z+Math.sin(a)*ring;mineralRocks[i].scanned=false}
+   miningIndex=0;scanTimer=0;miningActive=false;
+ }
+ if(m.type==='bounty'){
+   if(typeof spawnPirates==='function')spawnPirates(true);
+   pirates.filter(p=>p.hull>0).forEach((p,i)=>{const a=i*1.8+r.variant*.55,ring=180+i*135;p.x=r.x+Math.cos(a)*ring;p.y=r.y+(i%2?120:-80);p.z=r.z+Math.sin(a)*ring});combatTargetIndex=0;
+ }
+}
+function routeLabel(){const m=save.contract,r=m?.sgRoute;if(!m||!r||m.type==='delivery')return '';const d=Math.round(Math.hypot(r.x-station.x,r.y-station.y,r.z-station.z));return `\nMission zone: ${d.toLocaleString()} m · vector ${r.x>=station.x?'E':'W'}${r.z>=station.z?' / OUTER':' / INNER'} · profile ${r.index+1}.`}
+// Every newly accepted regular/career/dispatch/operation contract receives a distinct physical mission zone.
+const oldAccept=acceptContract; acceptContract=function(type){serial++;oldAccept(type);if(save.contract&&!save.contract.ready){ensureProfile(true);try{persist()}catch(e){};missionUI()}};
+if(typeof acceptCareer==='function'){const old=acceptCareer;acceptCareer=function(i){serial++;old(i);if(save.contract&&!save.contract.ready){ensureProfile(true);try{persist()}catch(e){};missionUI()}}}
+if(typeof acceptOperation==='function'){const old=acceptOperation;acceptOperation=function(i){serial++;old(i);if(save.contract&&!save.contract.ready){ensureProfile(true);try{persist()}catch(e){};missionUI()}}}
+if(typeof acceptDispatch==='function'){const old=acceptDispatch;acceptDispatch=function(i){serial++;old(i);if(save.contract&&!save.contract.ready){ensureProfile(true);try{persist()}catch(e){};missionUI()}}}
+// Apply the route at launch and whenever a multi-stage mission changes objective type.
+const oldDepart=depart;depart=function(){const m=save.contract;if(m&&!m.ready&&m.type!=='delivery')ensureProfile(!m.sgRoute);oldDepart();if(m&&!m.ready&&m.type!=='delivery'){applyProfile(m.sgRoute);if(m.type==='rescue')target='pod';if(m.type==='survey')target='survey';if(m.type==='mining')target='mine';if(m.type==='bounty')target='hostile';updateUI()}};
+const oldCareerTarget=typeof careerTarget==='function'?careerTarget:null;if(oldCareerTarget)careerTarget=function(){const m=save.contract;if(m&&!m.ready){serial++;ensureProfile(true)}oldCareerTarget();if(m?.sgRoute)applyProfile(m.sgRoute)};
+// Make instructions tell the pilot that the actual flight geometry changed, not merely the mission name.
+const oldInstructions=missionInstructions;missionInstructions=function(){return oldInstructions()+routeLabel()};
+// Delivery missions get varied origin/destination selection and handoff flavor.
+const oldMissionUI=missionUI;missionUI=function(){oldMissionUI();const m=save.contract;if(m?.type==='delivery'&&!m.ready){const flavors=['Priority diplomatic pouch','Reactor-control components','Medical cryocase','Encrypted fleet orders','Navigation core transfer','Emergency station parts'];const f=flavors[hash(currentKey())%flavors.length];if(document.getElementById('contractHUD'))document.getElementById('contractHUD').textContent=f+' · '+systems[m.dest].name+' · '+m.reward+' cr'}};
+// Prevent successive courier jobs from choosing the same destination pattern when alternatives exist.
+const baseAccept2=acceptContract;acceptContract=function(type){baseAccept2(type);const m=save.contract;if(type==='delivery'&&m&&!m.ready){const reachable=systems.map((_,i)=>i).filter(i=>i!==save.system&&routeTo(i).length);if(reachable.length>1){const pick=(save.completed+serial*3+save.system*5)%reachable.length;m.dest=reachable[pick];m.reward=1200+routeTo(m.dest).length*325+((serial%4)*125);try{persist()}catch(e){};missionUI()}}};
+// Existing active mission on first load also gets a route, so the fix is visible without abandoning it.
+setTimeout(()=>{if(save.contract&&!save.contract.ready&&save.contract.type!=='delivery'){ensureProfile(!save.contract.sgRoute);applyProfile(save.contract.sgRoute);updateUI();missionUI()}},250);
+})();
+</script>
+
+<script id="sg-deep-space-mission-sector-pass">
+(()=>{
+'use strict';
+if(window.__SG_DEEP_SECTOR__)return;window.__SG_DEEP_SECTOR__=true;
+const zoneNames=['Outer Debris Reach','Blackglass Belt','Far Lantern','Graveyard Vector','Silent Meridian','Warden Expanse','Ion Scar','Pilgrim Deep','Red Echo Field','Nightwatch Sector','Broken Crown','Helix Drift'];
+let deepSerial=0;
+function h32(s){let h=0x811c9dc5;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,0x01000193)}return h>>>0}
+function validDestinations(origin){let a=systems.map((_,i)=>i).filter(i=>i!==origin&&routeTo(i).length);return a.length?a:[origin]}
+function assignDeepMission(m,force=false){if(!m||m.ready)return;if(!force&&m.deepSector)return;
+ const seed=h32([m.type,m.source,m.reward,m.goal,save.completed,++deepSerial,Date.now()].join('|'));
+ const candidates=validDestinations(m.source??save.system);let dest=candidates[seed%candidates.length];
+ // Local jobs are now the exception: about one in six. Everything else requires travel to another system.
+ if((seed%6)===0)dest=m.source??save.system;
+ if(m.type==='delivery'&&candidates.length)dest=candidates[(seed>>>4)%candidates.length];
+ const angle=((seed>>>8)%6283)/1000,dist=5200+((seed>>>17)%7800),height=((seed>>>25)%2600)-1300;
+ m.dest=dest;m.deepSector={system:dest,name:zoneNames[(seed>>>12)%zoneNames.length],x:Math.cos(angle)*dist,y:height,z:Math.sin(angle)*dist,seed,dist};
+ // Old route data must not win after a region reload.
+ delete m.sgRoute;
+}
+function placeDeepObjective(){const m=save.contract,z=m?.deepSector;if(!m||m.ready||!z||save.system!==z.system)return false;
+ const x=station.x+z.x,y=station.y+z.y,zz=station.z+z.z;
+ if(m.type==='rescue'){pod.x=x;pod.y=y;pod.z=zz;podRoute='pod';if(!carrying)target='pod'}
+ if(m.type==='survey'){surveyBeacon.x=x;surveyBeacon.y=y;surveyBeacon.z=zz;surveyProgress=0;target='survey'}
+ if(m.type==='mining'){
+   for(let i=0;i<mineralRocks.length;i++){const a=i*1.047+(z.seed%31)/10,ring=160+(i%3)*145;mineralRocks[i].x=x+Math.cos(a)*ring;mineralRocks[i].y=y+((i%3)-1)*120;mineralRocks[i].z=zz+Math.sin(a)*ring;mineralRocks[i].scanned=false;}
+   miningIndex=0;scanTimer=0;miningActive=false;target='mine';
+ }
+ if(m.type==='bounty'){
+   spawnPirates(true);pirates.forEach((p,i)=>{const a=i*2.05+(z.seed%19)/8,ring=240+i*170;p.x=x+Math.cos(a)*ring;p.y=y+(i-1)*140;p.z=zz+Math.sin(a)*ring});combatTargetIndex=0;target='hostile';
+ }
+ return true;
+}
+function deepText(){const m=save.contract,z=m?.deepSector;if(!m||m.ready||!z)return '';
+ const sys=systems[z.system].name;if(save.system!==z.system)return `MISSION SECTOR: ${z.name} / ${sys}. Jump to ${sys} first; objective is ${Math.round(z.dist/100)/10} km beyond the station lanes.`;
+ return `MISSION SECTOR: ${z.name} / ${Math.round(Math.hypot(z.x,z.y,z.z)).toLocaleString()} m from ${systems[z.system].station}. This objective is outside the normal station/Earth corridor.`;
+}
+// Wrap every acceptance path after all earlier mission wrappers have finished loading.
+for(const fn of ['acceptContract','acceptCareer','acceptOperation','acceptDispatch']){if(typeof window[fn]!=='function')continue;const base=window[fn];window[fn]=function(...args){const before=save.contract;base.apply(this,args);if(save.contract&&save.contract!==before&&!save.contract.ready){assignDeepMission(save.contract,true);try{persist()}catch(e){};missionUI()}}}
+// Region generation used to force pod/survey/mining back beside every station. Re-apply the actual mission sector after it does that.
+const gen=generateRegion;generateRegion=function(){gen();placeDeepObjective()};
+// Jump arrival must restore the mission target in the destination system instead of selecting the station forever.
+const arr=arrive;arrive=function(){arr();const m=save.contract;if(m&&!m.ready&&m.deepSector&&save.system===m.deepSector.system){placeDeepObjective();toast('Mission sector reached: '+m.deepSector.name+'. Objective signal acquired.');updateUI()}};
+// Launch: if objective is in another system, launch toward jump navigation; otherwise target the deep-space objective.
+const dep=depart;depart=function(){const m=save.contract;if(m&&!m.ready&&!m.deepSector)assignDeepMission(m,true);dep();if(!m||m.ready)return;if(save.system!==m.deepSector.system){target='station';plannedRoute=routeTo(m.deepSector.system);toast('Mission is off-system. Clear the base, then JUMP to '+systems[m.deepSector.system].name+'.');}else placeDeepObjective();updateUI()};
+// Automation now travels to the mission system before attempting the local objective.
+if(typeof missionAssistStep==='function'){const mas=missionAssistStep;missionAssistStep=function(){const m=save.contract;if(m&&!m.ready&&m.deepSector&&save.system!==m.deepSector.system){assistStatus('Transit to '+m.deepSector.name+' / '+systems[m.deepSector.system].name);assistJump(m.deepSector.system);return}if(m?.deepSector)placeDeepObjective();return mas()}}
+// Briefing makes the destination unmistakable.
+const ins=missionInstructions;missionInstructions=function(){const base=ins();const extra=deepText();return extra?base+'\n'+extra:base};
+const mui=missionUI;missionUI=function(){mui();const m=save.contract,z=m?.deepSector;if(m&&!m.ready&&z&&$('contractHUD'))$('contractHUD').textContent=contractNames[m.type]+' · '+z.name+' · '+systems[z.system].name+' · '+m.reward+' cr'};
+// Upgrade an already-active mission too.
+setTimeout(()=>{const m=save.contract;if(m&&!m.ready){assignDeepMission(m,true);if(save.system===m.deepSector.system)placeDeepObjective();try{persist()}catch(e){};missionUI();updateUI()}},350);
+})();
+</script>
+
+
+<script>
+/* SPACE GODS — STATION BUILDOUT PART 1: EXTERIOR COMPLEX */
+(()=>{
+const oldStationDraw=stationDraw;
+function sgPoly(points,fill,stroke='#294d61',lw=1){const ps=points.map(p=>worldPoint(...p));if(ps.some(p=>!p))return;ctx.beginPath();ps.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.fillStyle=fill;ctx.fill();if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=lw;ctx.stroke()}}
+function sgBox(x,y,z,w,h,d,fill='#173448',edge='#47758a'){
+ const X=w/2,Y=h/2,Z=d/2,v=[[x-X,y-Y,z-Z],[x+X,y-Y,z-Z],[x+X,y+Y,z-Z],[x-X,y+Y,z-Z],[x-X,y-Y,z+Z],[x+X,y-Y,z+Z],[x+X,y+Y,z+Z],[x-X,y+Y,z+Z]];
+ const faces=[[0,1,2,3],[4,7,6,5],[0,4,5,1],[3,2,6,7],[0,3,7,4],[1,5,6,2]];
+ faces.map(f=>({f,z:f.reduce((a,i)=>a+camera(...v[i]).z,0)/4})).sort((a,b)=>b.z-a.z).forEach(o=>sgPoly(o.f.map(i=>v[i]),fill,edge,.8));
+}
+function sgBeam(a,b,r=7,fill='#1a3d50'){const dx=b[0]-a[0],dy=b[1]-a[1],dz=b[2]-a[2],L=Math.hypot(dx,dy,dz),n=Math.max(2,Math.ceil(L/90));for(let i=0;i<n;i++){const t=(i+.5)/n;sgBox(a[0]+dx*t,a[1]+dy*t,a[2]+dz*t,r,r,L/n+3,fill,'#4b7788')}}
+function sgLight(x,y,z,col='#74f7ff',size=5){const p=worldPoint(x,y,z);if(!p||p.z<2)return;const q=Math.max(1,Math.min(9,size*focal/p.z));ctx.save();ctx.shadowColor=col;ctx.shadowBlur=12;ellipse(p.x,p.y,q,q,col);ctx.restore()}
+function sgLabel(txt,x,y,z,col='#aeefff'){const p=worldPoint(x,y,z);if(!p||p.z<30||p.z>3600)return;ctx.fillStyle=col;ctx.textAlign='center';ctx.font=Math.max(9,Math.min(15,11000/p.z))+'px system-ui';ctx.fillText(txt,p.x,p.y)}
+function stationComplexDraw(){
+ const x=station.x,y=station.y,z=station.z;
+ // Four long structural spines make Gods Base read as an orbital city from a distance.
+ sgBox(x-430,y-15,z-20,520,34,44,'#142f42'); sgBox(x+430,y-15,z-20,520,34,44,'#142f42');
+ sgBox(x,y+250,z-35,38,470,42,'#17384b'); sgBox(x,y-235,z-35,38,390,42,'#17384b');
+ // GODS SHIPWORKS — large starboard construction yard with gantries and incomplete hull cradle.
+ const sx=x+690,sy=y+55,sz=z-120;
+ sgBox(sx,sy,sz,330,38,210,'#1b3343','#ba9a5e'); sgBox(sx-145,sy+105,sz,28,215,220,'#213d4c','#d3ad65');sgBox(sx+145,sy+105,sz,28,215,220,'#213d4c','#d3ad65');
+ sgBox(sx,sy+205,sz,320,24,220,'#243d49','#d3ad65');
+ for(let i=-2;i<=2;i++)sgBox(sx+i*62,sy+115,sz-72,24,28,120,'#5b6670','#f1b55e');
+ sgLabel('GODS SHIPWORKS',sx,sy+245,sz,'#ffd58a');
+ // Cargo district — port side container decks and cranes.
+ const cx=x-700,cy=y-35,cz=z+40;sgBox(cx,cy,cz,350,42,250,'#183341','#5a8795');
+ for(let row=0;row<3;row++)for(let col=0;col<5;col++)sgBox(cx-125+col*62,cy+38+row*30,cz-70+row*65,50,25,48,['#31556a','#604f43','#385c55'][row]);
+ for(const side of [-1,1]){sgBox(cx+side*145,cy+105,cz,18,165,18,'#536b74','#f0c66f');sgBeam([cx+side*145,cy+180,cz],[cx+side*40,cy+180,cz-65],9,'#4a6670')}
+ sgLabel('CARGO & LOGISTICS',cx,cy+220,cz,'#9deaff');
+ // Security / patrol docks above the station.
+ const px=x-250,py=y+500,pz=z-70;sgBox(px,py,pz,390,35,170,'#1d3347','#6995ad');
+ for(let i=-2;i<=2;i++){sgBox(px+i*78,py-35,pz+40,54,20,95,'#253f52');sgLight(px+i*78,py-18,pz+92,i%2?'#70ffb5':'#65dfff',6)}
+ sgLabel('SECURITY / PATROL WING',px,py+55,pz,'#9fe7ff');
+ // Industrial/refinery district below.
+ const rx=x+160,ry=y-510,rz=z+20;sgBox(rx,ry,rz,430,40,180,'#253a42','#8d7657');
+ for(let i=-2;i<=2;i++){sgBox(rx+i*82,ry+72,rz,48,135,48,'#3a4749','#ad8d62');sgLight(rx+i*82,ry+145,rz,'#ffb45d',5)}
+ sgLabel('REFINERY / REACTOR WORKS',rx,ry-40,rz,'#ffc983');
+ // Communications crown and sensor dishes.
+ const ax=x+190,ay=y+420,az=z+80;sgBox(ax,ay,az,180,25,120,'#193746');
+ for(let i=-1;i<=1;i++){const bx=ax+i*65;sgBox(bx,ay+105,az,9,190,9,'#5c7780');sgLight(bx,ay+205,az,i===0?'#ffdf72':'#75eaff',6)}
+ sgLabel('LONG-RANGE COMMS',ax,ay+235,az,'#a7f4ff');
+ // Civilian/service ring, a chain of modules forming a broad inhabited perimeter.
+ for(let i=0;i<12;i++){const a=i*Math.PI*2/12,rr=980,xx=x+Math.cos(a)*rr,yy=y+Math.sin(a)*rr*.42,zz=z+Math.sin(a)*180;sgBox(xx,yy,zz,105,42,75,i%3===0?'#28475a':'#1c394c','#4e8298');sgLight(xx,yy+32,zz,i%4===0?'#ffd477':'#6ff4ff',4)}
+ // Approach corridor: visible from kilometers out, without changing the original docking collision volume.
+ for(let i=1;i<=14;i++){const zz=z-420-i*145,spread=92+Math.min(i*4,48);sgLight(x-spread,y+12,zz,i%3===0?'#78ffad':'#4de9ff',5);sgLight(x+spread,y+12,zz,i%3===0?'#78ffad':'#4de9ff',5)}
+ sgLabel('PRIMARY APPROACH // PAD 07',x,y+110,z-900,'#72ffb2');
+ // Navigation beacons define alternate traffic corridors around the city.
+ const beacons=[[x-1250,y+230,z-850,'WEST GATE'],[x+1280,y+300,z-700,'SHIPWORKS GATE'],[x-900,y-420,z+650,'FREIGHT GATE'],[x+760,y+620,z+520,'PATROL GATE']];
+ beacons.forEach((b,j)=>{sgBox(b[0],b[1],b[2],18,110,18,'#355665');sgLight(b[0],b[1]+70,b[2],j%2?'#ffd168':'#5ff7ff',7);sgLabel(b[3],b[0],b[1]+105,b[2])});
+ // Animated service craft orbit locally; purely visual, no collision/docking interference.
+ for(let i=0;i<8;i++){const a=time*(.10+i*.006)+i*.79,rr=520+(i%3)*260,xx=x+Math.cos(a)*rr,yy=y+120+Math.sin(a*1.7)*170,zz=z+Math.sin(a)*rr*.72;sgBox(xx,yy,zz,30,12,55,i%2?'#7b9aaa':'#b38d5c','#a9dbe5');sgLight(xx,yy,zz-30,'#75eaff',3)}
+ // Construction sparks at Shipworks.
+ for(let i=0;i<5;i++){const a=time*2+i*1.7;sgLight(sx+Math.sin(a)*120,sy+85+Math.cos(a*1.3)*70,sz+Math.cos(a)*70,'#ffcb68',2.5)}
+}
+stationDraw=function(){stationComplexDraw();oldStationDraw();};
+// Expand ambient station traffic from six craft to twelve and give them distinct outer-city lanes.
+try{
+ const names=['MERIDIAN','HALCYON','ION COURIER','NOMAD','ORBITAL TUG','CARGO NINE','PATROL ONE','PATROL TWO','ATLAS FREIGHT','SHIPWORKS TUG','CIVIC SHUTTLE','REFINERY HAULER'];
+ while(traffic.length<12){const i=traffic.length;traffic.push({name:names[i],phase:i*.73,segment:0,progress:0,x:station.x,y:station.y,z:station.z-900,yaw:0,pitch:0,color:i%3===0?'#e5b97b':'#8ecddf',lastLeg:-1})}
+ trafficUpdate=function(dt){if(!['flight','dock'].includes(state))return;radioCooldown=Math.max(0,radioCooldown-dt);for(let i=0;i<traffic.length;i++){const n=traffic[i],lane=i%4,side=i%2?1:-1;const routes=[
+ [[station.x-1250,station.y+230,station.z-850],[station.x-520,station.y+150,station.z-520],[station.x-95,station.y+30,station.z-370],[station.x-95,station.y+30,station.z+90],[station.x-700,station.y+80,station.z+520]],
+ [[station.x+1280,station.y+300,station.z-700],[station.x+690,station.y+150,station.z-300],[station.x+95,station.y+30,station.z-370],[station.x+95,station.y+30,station.z+90],[station.x+1050,station.y+240,station.z+450]],
+ [[station.x-900,station.y-420,station.z+650],[station.x-700,station.y-80,station.z+180],[station.x-420,station.y+20,station.z-250],[station.x-850,station.y+120,station.z-900],[station.x-1450,station.y+260,station.z-1300]],
+ [[station.x+760,station.y+620,station.z+520],[station.x-250,station.y+500,station.z-70],[station.x+420,station.y+220,station.z-420],[station.x+1150,station.y+350,station.z-1000],[station.x+1500,station.y+500,station.z-1500]]];
+ const route=routes[lane];n.phase+=dt*(.055+(i%5)*.008);const leg=Math.floor(n.phase)%route.length,t=n.phase%1,a=route[leg],b=route[(leg+1)%route.length];n.x=a[0]+(b[0]-a[0])*t;n.y=a[1]+(b[1]-a[1])*t;n.z=a[2]+(b[2]-a[2])*t;n.yaw=Math.atan2(b[0]-a[0],b[2]-a[2]);n.pitch=Math.atan2(b[1]-a[1],Math.hypot(b[0]-a[0],b[2]-a[2]));if(leg!==n.lastLeg&&leg===1&&radioCooldown===0&&i<6)radio(n.name+': entering Gods Base traffic control.');n.lastLeg=leg}}
+}catch(e){console.warn('Station traffic expansion skipped',e)}
+setTimeout(()=>toast('GODS BASE EXPANSION ONLINE // Shipworks, cargo, security, refinery and traffic districts active.'),900);
+})();
+</script>
+
+
+<style id="sg-station-part2-css">
+#sgDistrictPanel{position:fixed;inset:0;z-index:21000;display:none;align-items:flex-start;justify-content:center;padding:18px;background:#01070dcf;backdrop-filter:blur(8px)}
+#sgDistrictPanel.on{display:flex}.sgd-shell{width:min(960px,100%);max-height:calc(100dvh - 36px);overflow:auto;background:linear-gradient(150deg,#0b2130fa,#040b12fb);border:1px solid #4e8195;border-radius:16px;box-shadow:0 28px 90px #000c;padding:16px}.sgd-head{display:flex;justify-content:space-between;gap:12px;align-items:center}.sgd-head h2{margin:2px 0 12px;font-size:20px}.sgd-head small{color:#79ddea}.sgd-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.sgd-card{border:1px solid #31596d;border-radius:12px;background:#091923;padding:13px;text-align:left;color:#dffaff;min-height:122px}.sgd-card.active{border-color:#ffd06f;box-shadow:inset 0 0 24px #ffca5220}.sgd-card b{display:block;color:#a8f5ff;font-size:14px}.sgd-card p{margin:7px 0;color:#9fb9c4;font-size:12px;line-height:1.35}.sgd-card button,.sgd-close,#sgDistrictAction{border:1px solid #5a8ca0;background:#102d3c;color:#e9fbff;border-radius:8px;padding:9px 12px;cursor:pointer}.sgd-card button{margin-right:6px}.sgd-card button.primary,#sgDistrictAction{border-color:#e4b85f;color:#ffe2a4}.sgd-status{margin:12px 0 0;padding:10px;border:1px solid #294b5c;border-radius:10px;background:#06131c;color:#b8d7e1;font-size:12px}
+#sgDistrictHUD{position:fixed;z-index:9000;left:50%;top:86px;transform:translateX(-50%);display:none;min-width:min(520px,88vw);padding:8px 12px;border:1px solid #4c8194;border-radius:10px;background:#03111bd9;color:#dffaff;text-align:center;pointer-events:none;box-shadow:0 10px 30px #0008}#sgDistrictHUD.on{display:block}#sgDistrictHUD b{color:#ffd67c}#sgDistrictAction{position:fixed;z-index:9001;left:50%;bottom:104px;transform:translateX(-50%);display:none;font-weight:800;box-shadow:0 10px 35px #000a}#sgDistrictAction.on{display:block}
+@media(max-width:680px){#sgDistrictPanel{padding:7px}.sgd-grid{grid-template-columns:1fr}.sgd-shell{max-height:calc(100dvh - 14px);padding:11px}#sgDistrictHUD{top:72px;font-size:11px}#sgDistrictAction{bottom:88px}}
+</style>
+<div id="sgDistrictPanel" aria-hidden="true"><div class="sgd-shell"><div class="sgd-head"><div><small>GODS BASE // LOCAL NAVIGATION</small><h2>STATION DISTRICTS</h2></div><button class="sgd-close" id="sgDistrictClose">RETURN</button></div><div id="sgDistrictGrid" class="sgd-grid"></div><div id="sgDistrictStatus" class="sgd-status">Select a district to create a local flight route.</div></div></div>
+<div id="sgDistrictHUD"><b id="sgDistrictName">DISTRICT</b> · <span id="sgDistrictRange">--</span><br><span id="sgDistrictHint">Local station route</span></div><button id="sgDistrictAction">ENTER DISTRICT</button>
+<script id="sg-station-part2-js">
+(()=>{
+'use strict';if(window.__SG_STATION_PART2__)return;window.__SG_STATION_PART2__=true;
+const $=id=>document.getElementById(id),panel=$('sgDistrictPanel'),grid=$('sgDistrictGrid'),status=$('sgDistrictStatus'),hud=$('sgDistrictHUD'),action=$('sgDistrictAction');
+const defs={
+ shipworks:{name:'GODS SHIPWORKS',desc:'Construction cradles, capital hull assembly, outfitting and vessel design.',off:[690,55,-120],gate:[1280,300,-700],action:'SHIPWORKS'},
+ cargo:{name:'CARGO & LOGISTICS',desc:'Freight decks, commodity exchange, mineral sales and cargo handling.',off:[-700,-35,40],gate:[-1250,230,-850],action:'CARGO'},
+ security:{name:'SECURITY / PATROL WING',desc:'Patrol deployment, combat board, bounties and local security operations.',off:[-250,500,-70],gate:[760,620,520],action:'SECURITY'},
+ refinery:{name:'REFINERY / REACTOR WORKS',desc:'Fuel, hull service, engineering support and industrial processing.',off:[160,-510,20],gate:[-900,-420,650],action:'REFINERY'},
+ comms:{name:'LONG-RANGE COMMS',desc:'Galaxy navigation, jump routing, intelligence and signal traffic.',off:[190,420,80],gate:[520,700,-420],action:'COMMS'},
+ civic:{name:'CIVILIAN / SERVICE RING',desc:'Crew services, station administration, dispatch and civilian traffic.',off:[0,0,900],gate:[0,260,1150],action:'CIVIC'}
+};
+let selected=null;
+function atGods(){return typeof save!=='undefined'&&save.system===0}
+function pos(d){return {x:station.x+d.off[0],y:station.y+d.off[1],z:station.z+d.off[2]}}
+function dist(d){const p=pos(d);return Math.hypot(ship.x-p.x,ship.y-p.y,ship.z-p.z)}
+function renderGrid(){grid.innerHTML=Object.entries(defs).map(([k,d])=>`<article class="sgd-card ${selected===k?'active':''}"><b>${d.name}</b><p>${d.desc}</p><button class="primary" data-route="${k}">${selected===k?'ROUTE ACTIVE':'SET FLIGHT ROUTE'}</button><button data-use="${k}">SERVICES</button></article>`).join('');grid.querySelectorAll('[data-route]').forEach(b=>b.onclick=()=>route(b.dataset.route));grid.querySelectorAll('[data-use]').forEach(b=>b.onclick=()=>use(b.dataset.use,true))}
+function open(){panel.classList.add('on');panel.setAttribute('aria-hidden','false');try{keys.clear()}catch(e){};renderGrid();status.textContent=atGods()?'Choose a district. Your HUD will show a dedicated local target and range.':'District navigation is available at Gods Base of Operations. Jump to Aurora / Gods Base first.'}
+function close(){panel.classList.remove('on');panel.setAttribute('aria-hidden','true')}
+function route(k){if(!atGods()){status.textContent='You are away from Gods Base. Use GALAXY / JUMP to return to Aurora first.';return}selected=k;close();const d=defs[k];try{target='none';auto=false}catch(e){};toast('LOCAL ROUTE SET // '+d.name);radio('Gods Base Control: '+d.name+' route transmitted. Follow the district marker.');updateHud();}
+function use(k,fromMenu=false){const d=defs[k];if(!atGods()){status.textContent='Services unavailable: return to Gods Base.';return}const r=dist(d);if(!fromMenu&&r>230){toast(d.name+' is '+Math.round(r)+' m away. Approach closer.');return}if(fromMenu&&r>350){selected=k;close();toast('Route set to '+d.name+'. Fly there to use local services.');return}
+ close();
+ if(d.action==='SHIPWORKS'){const b=$('freshSWAccess');if(b)b.click();else document.querySelector('button[data-sg="shipworks"]')?.click()}
+ else if(d.action==='CARGO'){if(typeof terminalOpenLeaf==='function'){try{terminalOpenLeaf('trade','market')}catch(e){}}else $('dock_cargo')?.classList.remove('hidden')}
+ else if(d.action==='SECURITY'){if(typeof openBaseMissions==='function')openBaseMissions();else if(typeof combatJobUI==='function'){combatJobUI();$('combatJobPanel')?.classList.remove('hidden')}}
+ else if(d.action==='REFINERY'){if(typeof dockUI==='function')dockUI();$('dockPanel')?.classList.remove('hidden');toast('Refinery link: hull, fuel and engineering services online.')}
+ else if(d.action==='COMMS'){if(typeof openNav==='function')openNav();else $('nav')?.click()}
+ else if(d.action==='CIVIC'){if(typeof commandOpen==='function'){commandOpen();if(typeof commandUI==='function')commandUI()}else $('openCommand')?.click()}
+}
+function updateHud(){if(!selected||!atGods()||!['flight','dock'].includes(state)){hud.classList.remove('on');action.classList.remove('on');return}const d=defs[selected],r=dist(d);$('sgDistrictName').textContent=d.name;$('sgDistrictRange').textContent=Math.round(r).toLocaleString()+' m';$('sgDistrictHint').textContent=r<230?'Arrival envelope reached — district services available':'Local station route — approach the highlighted district';hud.classList.add('on');action.textContent='ENTER '+d.name;action.classList.toggle('on',r<230&&state==='flight')}
+function drawMarker(){if(!selected||!atGods()||state!=='flight')return;const d=defs[selected],p=pos(d),q=worldPoint(p.x,p.y,p.z);if(!q||q.z<3)return;ctx.save();const rr=Math.max(12,Math.min(34,9000/q.z));ctx.strokeStyle='#ffd36f';ctx.lineWidth=2;ctx.beginPath();ctx.arc(q.x,q.y,rr,0,Math.PI*2);ctx.stroke();ctx.beginPath();ctx.moveTo(q.x-rr-8,q.y);ctx.lineTo(q.x-rr+3,q.y);ctx.moveTo(q.x+rr-3,q.y);ctx.lineTo(q.x+rr+8,q.y);ctx.moveTo(q.x,q.y-rr-8);ctx.lineTo(q.x,q.y-rr+3);ctx.stroke();ctx.fillStyle='#ffe6a7';ctx.font='700 11px system-ui';ctx.textAlign='center';ctx.fillText(d.name,q.x,q.y-rr-11);ctx.restore()}
+$('sgDistrictClose').onclick=close;panel.onclick=e=>{if(e.target===panel)close()};action.onclick=()=>selected&&use(selected,false);
+// Render the district marker as part of the existing station pass.
+const prevStation=stationDraw;stationDraw=function(){prevStation();drawMarker()};
+// Update local route range without adding another animation loop.
+const prevUpdateUI=updateUI;updateUI=function(){prevUpdateUI();updateHud()};
+// Esc backs out of the district navigator.
+addEventListener('keydown',e=>{if(e.key==='Escape'&&panel.classList.contains('on')){e.preventDefault();e.stopImmediatePropagation();close()}},true);
+window.SGStationDistricts={open,close,route,use,defs,get selected(){return selected}};
+setTimeout(()=>toast('STATION DISTRICTS ONLINE // Local navigation and district services linked.'),800);
+})();
+</script>
+
+
+<style id="sg-station-part3-css">
+#sgLivingBtn{position:fixed;right:14px;bottom:150px;z-index:9050;border:1px solid #5d93a8;background:#071b27e8;color:#dffaff;border-radius:10px;padding:9px 12px;font:800 11px system-ui;letter-spacing:.06em;box-shadow:0 8px 28px #0009;cursor:pointer}
+#sgLivingBtn.alert{border-color:#ffcc68;color:#ffe2a1;box-shadow:0 0 24px #ffbf3540}
+#sgLivingPanel{position:fixed;inset:0;z-index:22000;display:none;align-items:flex-start;justify-content:center;padding:18px;background:#01070dd9;backdrop-filter:blur(8px)}#sgLivingPanel.on{display:flex}
+.sgl-shell{width:min(1000px,100%);max-height:calc(100dvh - 36px);overflow:auto;background:linear-gradient(145deg,#0a1e2b,#030a10);border:1px solid #4b7f94;border-radius:16px;padding:16px;box-shadow:0 28px 90px #000d}.sgl-head{display:flex;justify-content:space-between;gap:12px;align-items:center}.sgl-head h2{margin:3px 0 12px}.sgl-close,.sgl-job button{border:1px solid #557f91;background:#0e2937;color:#e7fbff;border-radius:8px;padding:9px 11px;cursor:pointer}.sgl-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.sgl-card{border:1px solid #294c5d;border-radius:12px;padding:12px;background:#071722}.sgl-card b{color:#9eeeff}.sgl-card small{display:block;color:#87a8b5;margin-top:5px}.sgl-event{color:#ffd889;margin-top:8px}.sgl-jobs{display:grid;gap:8px;margin-top:12px}.sgl-job{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;border:1px solid #2d5365;border-radius:10px;padding:10px;background:#06131c}.sgl-job b{display:block;color:#dffaff}.sgl-job span{display:block;color:#9cb8c4;font-size:12px;margin-top:3px}.sgl-job button{border-color:#d4a94e;color:#ffe09a}.sgl-status{margin-top:12px;padding:10px;border:1px solid #294c5d;border-radius:10px;color:#b9d7e2;background:#051019}
+#sgLocalJobHUD{position:fixed;z-index:9045;right:14px;top:130px;width:min(300px,42vw);display:none;border:1px solid #d0a94e;border-radius:10px;padding:9px 11px;background:#07131de8;color:#dffaff;font:12px system-ui;box-shadow:0 8px 30px #0009}#sgLocalJobHUD.on{display:block}#sgLocalJobHUD b{color:#ffd77d;display:block;margin-bottom:3px}
+@media(max-width:680px){#sgLivingPanel{padding:7px}.sgl-grid{grid-template-columns:1fr}.sgl-shell{max-height:calc(100dvh - 14px);padding:11px}#sgLivingBtn{right:8px;bottom:138px}#sgLocalJobHUD{right:8px;top:116px;width:min(270px,70vw)}}
+</style>
+<button id="sgLivingBtn">BASE ACTIVITY</button>
+<div id="sgLocalJobHUD"><b id="sgLocalJobTitle">LOCAL JOB</b><span id="sgLocalJobText"></span></div>
+<div id="sgLivingPanel" aria-hidden="true"><div class="sgl-shell"><div class="sgl-head"><div><small>GODS BASE // LIVE OPERATIONS</small><h2>LIVING STATION</h2></div><button class="sgl-close" id="sgLivingClose">RETURN</button></div><div id="sgLivingGrid" class="sgl-grid"></div><h3>LOCAL STATION JOBS</h3><div id="sgLivingJobs" class="sgl-jobs"></div><div id="sgLivingStatus" class="sgl-status">Station traffic and district operations are active.</div></div></div>
+<script id="sg-station-part3-js">
+(()=>{
+'use strict';if(window.__SG_STATION_PART3__)return;window.__SG_STATION_PART3__=true;
+const $=id=>document.getElementById(id),panel=$('sgLivingPanel'),grid=$('sgLivingGrid'),jobs=$('sgLivingJobs'),status=$('sgLivingStatus'),btn=$('sgLivingBtn'),jobHud=$('sgLocalJobHUD');
+const district=window.SGStationDistricts,defs=district?.defs||{};
+const labels={shipworks:'GODS SHIPWORKS',cargo:'CARGO & LOGISTICS',security:'SECURITY / PATROL',refinery:'REFINERY / REACTOR',comms:'LONG-RANGE COMMS',civic:'CIVILIAN / SERVICE'};
+const eventPools={
+ shipworks:['Dreadnought keel section moving to cradle 2','Escort hull undergoing engine-light test','Construction drones welding outer armor','New interceptor frame cleared for fitting'],
+ cargo:['Ore freighter unloading at deck C','Priority containers transferring to customs','Heavy tug repositioning cargo modules','Trade convoy requesting departure window'],
+ security:['Patrol wing launching two interceptors','Security sweep active beyond west gate','Bounty vessel being escorted to holding','Combat flight returning for rearm'],
+ refinery:['Fuel tender connected to reactor works','Coolant manifold maintenance underway','Damaged freighter receiving hull patch','Refinery processing recovered asteroid ore'],
+ comms:['Deep-space burst transmission acquired','Jump corridor telemetry being recalibrated','Navigation relay tracking inbound convoy','Encrypted fleet signal awaiting decode'],
+ civic:['Passenger shuttle entering service ring','Medical transport requesting priority lane','Crew transfer bus crossing inner approach','Civilian liner boarding for departure']
+};
+const jobTemplates=[
+ {from:'cargo',to:'shipworks',name:'Deliver fabrication cores',verb:'Transfer the fabrication cores to Gods Shipworks.',pay:480},
+ {from:'shipworks',to:'security',name:'Move interceptor components',verb:'Carry interceptor components to the Security Wing.',pay:520},
+ {from:'security',to:'comms',name:'Relay patrol telemetry',verb:'Deliver encrypted patrol telemetry to Long-Range Comms.',pay:440},
+ {from:'comms',to:'civic',name:'Priority signal handoff',verb:'Carry the decoded priority packet to Civilian Services.',pay:390},
+ {from:'civic',to:'refinery',name:'Emergency coolant request',verb:'Take emergency service parts to the Refinery Works.',pay:560},
+ {from:'refinery',to:'cargo',name:'Return processed alloys',verb:'Move processed alloy containers to Cargo & Logistics.',pay:610},
+ {from:'security',to:'civic',name:'Escort medical shuttle',verb:'Fly the security corridor to the Civilian Service Ring.',pay:680},
+ {from:'cargo',to:'comms',name:'Navigation array delivery',verb:'Deliver replacement array hardware to Long-Range Comms.',pay:590}
+];
+let cycle=0,lastEvent=0,activeJob=null,offers=[],eventState={};
+function atBase(){return typeof save!=='undefined'&&save.system===0}
+function dpos(k){const d=defs[k];return d?{x:station.x+d.off[0],y:station.y+d.off[1],z:station.z+d.off[2]}:null}
+function range(k){const p=dpos(k);return p?Math.hypot(ship.x-p.x,ship.y-p.y,ship.z-p.z):99999}
+function chooseEvents(){for(const k of Object.keys(eventPools)){const a=eventPools[k];eventState[k]=a[(cycle+Object.keys(eventPools).indexOf(k)*2)%a.length]}cycle++;lastEvent=Date.now()}
+function makeOffers(){offers=[];for(let i=0;i<4;i++){const t=jobTemplates[(cycle*3+i*2+save.completed)%jobTemplates.length];offers.push({...t,id:Date.now()+i,pay:t.pay+((cycle+i)%4)*70})}}
+function render(){if(!lastEvent)chooseEvents();if(!offers.length)makeOffers();grid.innerHTML=Object.keys(labels).map(k=>`<article class="sgl-card"><b>${labels[k]}</b><small>${k==='security'?'PATROL STATUS':k==='cargo'?'FREIGHT STATUS':k==='shipworks'?'CONSTRUCTION STATUS':k==='refinery'?'INDUSTRIAL STATUS':k==='comms'?'SIGNAL STATUS':'CIVILIAN STATUS'}</small><div class="sgl-event">${eventState[k]}</div></article>`).join('');jobs.innerHTML=offers.map((j,i)=>`<div class="sgl-job"><div><b>${j.name}</b><span>${labels[j.from]} → ${labels[j.to]} · ${j.pay} cr</span></div><button data-job="${i}" ${activeJob?'disabled':''}>${activeJob?'JOB ACTIVE':'ACCEPT'}</button></div>`).join('');jobs.querySelectorAll('[data-job]').forEach(b=>b.onclick=()=>acceptJob(+b.dataset.job));status.textContent=!atBase()?'Live Gods Base operations are remote. Return to Aurora / Gods Base to accept local work.':activeJob?`Active: ${activeJob.name}. ${activeJob.stage===0?'Fly to '+labels[activeJob.from]+' for pickup.':'Deliver to '+labels[activeJob.to]+'.'}`:'Station activity is live. Local jobs use the districts around Gods Base.';btn.classList.toggle('alert',!!activeJob)}
+function open(){panel.classList.add('on');panel.setAttribute('aria-hidden','false');try{keys.clear()}catch(e){};render()}
+function close(){panel.classList.remove('on');panel.setAttribute('aria-hidden','true')}
+function acceptJob(i){if(!atBase()){status.textContent='Return to Gods Base before accepting local station work.';return}const j=offers[i];if(!j||activeJob)return;activeJob={...j,stage:0};close();district?.route(j.from);toast('LOCAL JOB ACCEPTED // '+j.name);radio('Gods Base Dispatch: proceed to '+labels[j.from]+' for pickup.');updateJobHud()}
+function updateJobHud(){if(!activeJob||!atBase()||!['flight','dock'].includes(state)){jobHud.classList.remove('on');return}const k=activeJob.stage===0?activeJob.from:activeJob.to,r=range(k);$('sgLocalJobTitle').textContent=activeJob.name+' · '+activeJob.pay+' cr';$('sgLocalJobText').textContent=(activeJob.stage===0?'PICKUP ':'DELIVER ')+labels[k]+' · '+Math.round(r).toLocaleString()+' m';jobHud.classList.add('on')}
+function jobAction(k){if(!activeJob||k!==(activeJob.stage===0?activeJob.from:activeJob.to))return false;if(range(k)>250)return false;if(activeJob.stage===0){activeJob.stage=1;toast('PICKUP COMPLETE // '+activeJob.name);radio(labels[k]+': cargo/packet secured. Proceed to '+labels[activeJob.to]+'.');setTimeout(()=>district?.route(activeJob.to),100);updateJobHud();return true}save.credits+=activeJob.pay;save.completed=(save.completed||0)+1;try{persist()}catch(e){};toast('LOCAL JOB COMPLETE // +'+activeJob.pay+' cr');radio('Gods Base Dispatch: delivery confirmed. Payment transferred.');activeJob=null;offers=[];makeOffers();updateJobHud();return true}
+// Add local-job handling ahead of the normal district service action without disabling services.
+if(district){const oldUse=district.use;district.use=function(k,fromMenu=false){if(!fromMenu&&jobAction(k))return;return oldUse(k,fromMenu)}}
+// Active traffic gets busier around Gods Base during operations, without another animation loop.
+const oldUpdate=update;update=function(dt){oldUpdate(dt);if(!atBase()||state!=='flight')return;try{if(typeof stationTraffic!=='undefined'){const pulse=(Date.now()%12000)/12000;stationTraffic.forEach((n,i)=>{if(i%3===0)n.phase+=dt*(pulse>.72?.035:.008)})}}catch(e){}}
+// Draw moving cargo/service lights between district structures.
+const oldStation=stationDraw;stationDraw=function(){oldStation();if(!atBase())return;const links=[['cargo','shipworks'],['security','civic'],['refinery','cargo'],['comms','security']];ctx.save();for(let i=0;i<links.length;i++){const a=dpos(links[i][0]),b=dpos(links[i][1]);if(!a||!b)continue;const t=((Date.now()/7000+i*.23)%1),p={x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,z:a.z+(b.z-a.z)*t},q=worldPoint(p.x,p.y,p.z);if(q&&q.z>3){ctx.fillStyle=i%2?'#ffd56b':'#79eaff';ctx.beginPath();ctx.arc(q.x,q.y,Math.max(2,Math.min(6,1400/q.z)),0,Math.PI*2);ctx.fill()}}ctx.restore()}
+const oldUI=updateUI;updateUI=function(){oldUI();updateJobHud()};
+btn.onclick=open;$('sgLivingClose').onclick=close;panel.onclick=e=>{if(e.target===panel)close()};addEventListener('keydown',e=>{if(e.key==='Escape'&&panel.classList.contains('on')){e.preventDefault();e.stopImmediatePropagation();close()}},true);
+// Slow event cadence: enough life without expensive constant timers.
+setInterval(()=>{if(Date.now()-lastEvent>45000){chooseEvents();makeOffers();if(panel.classList.contains('on'))render();if(atBase()&&state==='flight'&&Math.random()<.35){const ks=Object.keys(labels),k=ks[cycle%ks.length];radio(labels[k]+': '+eventState[k]+'.')}}},12000);
+window.SGLivingStation={open,get activeJob(){return activeJob},events:eventState};
+setTimeout(()=>{chooseEvents();makeOffers();toast('LIVING STATION ONLINE // Traffic, district operations and local jobs active.')},900);
+})();
+</script>
+
 </body></html>
