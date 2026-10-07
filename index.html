@@ -93,7 +93,19 @@ body{overflow-x:hidden}
 }
 #sgBuriedSystems button:hover{opacity:1 !important}
 </style>
-</head><body>
+<style id="living-galaxy-expansion-css">
+#lgAccess{position:fixed;left:12px;bottom:12px;z-index:3900;width:auto!important;padding:8px 12px!important;font-size:11px!important}
+#lgPanel{display:none;position:fixed;inset:5%;z-index:12000;background:rgba(2,9,16,.97);border:1px solid #2a708d;border-radius:10px;color:#dff8ff;padding:14px;overflow:auto;font:12px system-ui,sans-serif}
+#lgPanel.on{display:block} #lgPanel h2{margin:0;color:#8de9ff;letter-spacing:.12em}
+#lgTabs{display:flex;flex-wrap:wrap;gap:5px;margin:12px 0} #lgTabs button{width:auto!important;padding:7px 9px!important;font-size:10px!important}
+.lgGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:9px}
+.lgCard{border:1px solid #173e50;background:#06131e;padding:10px;border-radius:7px;min-width:0}
+.lgCard b{color:#87e9ff}.lgCard button{width:auto!important;margin:5px 4px 0 0!important;padding:6px 8px!important;font-size:10px!important}
+#lgNotice{position:fixed;left:50%;top:14%;transform:translateX(-50%);z-index:8000;max-width:min(560px,86vw);padding:9px 14px;background:rgba(2,12,20,.94);border:1px solid #54d9ff;border-radius:7px;color:#eaffff;font:700 12px system-ui;letter-spacing:.06em;display:none}
+#lgJumpScene{display:none;position:fixed;inset:0;z-index:11000;background:radial-gradient(circle at center,#17445c,#020711 62%,#000);color:#e8fbff;align-items:center;justify-content:center;text-align:center;font:700 20px system-ui;letter-spacing:.18em;pointer-events:none}
+#lgJumpScene.on{display:flex;animation:lgpulse 1.1s ease-in-out infinite alternate}@keyframes lgpulse{to{filter:brightness(1.55)}}
+@media(max-width:700px){#lgPanel{inset:3%;padding:10px}#lgAccess{bottom:64px}.lgGrid{grid-template-columns:1fr}}
+</style></head><body>
 <canvas id="world" aria-label="First person view from a spacecraft cockpit"></canvas>
 <div id="hud"><div class="top"><span class="brand">SPACE GODS <span style="color:#5d8399">/ AURORA FLIGHT SYSTEMS</span></span><div class="tools"><button id="view" title="Switch cockpit / chase camera · V">Outside view</button><button id="openDocking" title="Docking request and landing commands">Dock</button><button id="mouse" title="Capture mouse for steering · M">Mouse</button><button id="sound">Sound off</button><button id="pause">Pause</button></div></div>
 <div class="readout">VELOCITY <strong id="speed">0</strong> m/s<br>HULL <span id="hull">100</span>%<div class="bar"><i id="hullbar"></i></div>FUEL <span id="fuel">100</span>%<div class="bar"><i id="fuelbar"></i></div><span id="assistState">MANUAL FLIGHT</span><br><span id="shieldInfo">SHIELD 100% / HEAT 0%</span><br><span id="engineeringInfo">REACTOR STABLE</span></div>
@@ -2024,6 +2036,76 @@ addEventListener('pointerdown',()=>{const h=document.getElementById('mouseHint')
 })();
 </script>
 
+
+<button id="lgAccess" type="button">LIVING GALAXY</button>
+<div id="lgNotice"></div><div id="lgJumpScene"><div id="lgJumpText">JUMP CORRIDOR</div></div>
+<section id="lgPanel" aria-label="Living Galaxy">
+ <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><div><h2>SPACE GODS // LIVING GALAXY</h2><div id="lgSummary">Dynamic operations network online.</div></div><button id="lgClose" type="button" style="width:auto">RETURN</button></div>
+ <div id="lgTabs"></div><div id="lgContent"></div>
+</section>
+
+<script id="living-galaxy-expansion-js">
+(()=>{
+ if(window.__LIVING_GALAXY__)return; window.__LIVING_GALAXY__=true;
+ const $=id=>document.getElementById(id), clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+ const defaults={xp:0,rank:0,arc:0,arcStep:0,academy:0,faction:[50,50,50],danger:25,trade:50,security:55,wingmen:[{name:'Rook',level:1,status:'ready'}],activeWing:null,salvage:[],log:[],capital:{fore:100,aft:100,port:100,starboard:100,fighters:4,repairs:3},encounter:null,lastEncounter:Date.now(),discoveries:0};
+ let G;try{G=Object.assign(defaults,JSON.parse(localStorage.getItem('spaceGods.livingGalaxy.v2')||'{}'))}catch(e){G=defaults}
+ const save=()=>{try{localStorage.setItem('spaceGods.livingGalaxy.v2',JSON.stringify(G))}catch(e){}};
+ const log=t=>{G.log.unshift(new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})+' · '+t);G.log=G.log.slice(0,80);save()};
+ const notice=t=>{const n=$('lgNotice');n.textContent=t;n.style.display='block';clearTimeout(notice.t);notice.t=setTimeout(()=>n.style.display='none',4200)};
+ const ranks=['Cadet','Pilot','Specialist','Lieutenant','Commander','Captain','Admiral'];
+ const tabs=['OPERATIONS','ENCOUNTERS','COMMAND','ACADEMY','FLEET','SALVAGE','GALAXY','CAPTAIN LOG'];
+ let tab='OPERATIONS';
+ function button(txt,act){return `<button type="button" data-lg="${act}">${txt}</button>`}
+ function render(){
+  $('lgSummary').textContent=`${ranks[Math.min(6,G.rank)]} · ${G.xp} XP · Danger ${G.danger}% · Trade ${G.trade}% · Discoveries ${G.discoveries}`;
+  $('lgTabs').innerHTML=tabs.map(x=>`<button type="button" data-tab="${x}">${x}</button>`).join('');
+  const arcNames=['Ghost Signal','Broken Crown','Leviathan Wake','Gods Frontier'];
+  let h='';
+  if(tab==='OPERATIONS')h=`<div class="lgGrid"><div class="lgCard"><b>CHAINED OPERATION</b><h3>${arcNames[G.arc%arcNames.length]}</h3><p>Stage ${G.arcStep+1}/5. Missions now lead into larger operations instead of ending as isolated jobs.</p>${button('ADVANCE OPERATION','arc')}</div><div class="lgCard"><b>MISSION NETWORK</b><p>Rescue → intelligence → pursuit → fleet action → command decision.</p>${button('GENERATE OPERATION','op')}</div><div class="lgCard"><b>APPROACH ZONE</b><p>Enter a cinematic station, moon, city-orbit, asteroid, or fleet approach.</p>${button('BEGIN APPROACH','approach')}</div></div>`;
+  if(tab==='ENCOUNTERS')h=`<div class="lgGrid">${['DISTRESS CALL','DERELICT SHIP','PIRATE INTERDICTION','TRADE CONVOY','UNKNOWN ANOMALY','ASTEROID WRECK'].map((x,i)=>`<div class="lgCard"><b>${x}</b><p>${['A damaged vessel is transmitting emergency telemetry.','A powerless hull drifts beyond the traffic lane.','Hostile contacts are moving to intercept.','Civilian traffic requests escort through the sector.','Sensors cannot classify the signal.','Fresh debris contains recoverable components.'][i]}</p>${button('INVESTIGATE','enc'+i)}</div>`).join('')}</div>`;
+  if(tab==='COMMAND')h=`<div class="lgGrid">${['Operations','Intelligence','Engineering','Trade','Personnel','Navigation','Records'].map(x=>`<div class="lgCard"><b>${x.toUpperCase()}</b><p>Command Center node ready. Current sector data feeds this console.</p>${button('OPEN '+x.toUpperCase(),'cmd')}</div>`).join('')}</div>`;
+  if(tab==='ACADEMY')h=`<div class="lgGrid">${['Docking','Targeting','Combat','Boost Control','Cargo Retrieval','Navigation','Emergency Recovery','Capital Certification'].map((x,i)=>`<div class="lgCard"><b>${i<G.academy?'✓ ':''}${x}</b><p>${i<G.academy?'Certification completed.':'Training simulation available.'}</p>${i===G.academy?button('RUN TRAINING','train'):''}</div>`).join('')}</div>`;
+  if(tab==='FLEET')h=`<div class="lgGrid"><div class="lgCard"><b>WING COMMAND</b><p>${G.activeWing?'Active: '+G.activeWing:'No wingman deployed.'}</p>${button('SUMMON ROOK','wing')}${button('DISMISS','dismiss')}${button('ATTACK ORDER','attack')}${button('DEFEND ORDER','defend')}</div><div class="lgCard"><b>CAPITAL COMMAND</b><p>Fore ${G.capital.fore}% · Aft ${G.capital.aft}% · Port ${G.capital.port}% · Starboard ${G.capital.starboard}%<br>Fighters ${G.capital.fighters} · Repair crews ${G.capital.repairs}</p>${button('ALL BATTERIES FIRE','fire')}${button('LAUNCH FIGHTERS','fighters')}${button('REPAIR SECTOR','repair')}</div></div>`;
+  if(tab==='SALVAGE')h=`<div class="lgGrid"><div class="lgCard"><b>RECOVERED MATERIALS</b><p>${G.salvage.length?G.salvage.join(' · '):'Hangar salvage lockers empty.'}</p>${button('SCAN LOCAL WRECKAGE','salvage')}</div><div class="lgCard"><b>SHIPWORKS BLUEPRINTS</b><p>Rare salvage can reveal reactor, armor, weapon and hangar components for later Shipworks expansion.</p></div></div>`;
+  if(tab==='GALAXY')h=`<div class="lgGrid"><div class="lgCard"><b>LIVING SECTOR</b><p>Security ${G.security}% · Pirate danger ${G.danger}% · Trade strength ${G.trade}%.</p>${button('ADVANCE GALAXY EVENT','event')}</div><div class="lgCard"><b>JUMP SEQUENCES</b><p>Hyperspace tunnel · nebula crossing · star flyby · asteroid passage · fleet arrival · planetary approach.</p>${button('TEST RANDOM JUMP','jump')}</div></div>`;
+  if(tab==='CAPTAIN LOG')h=`<div class="lgCard"><b>AUTOMATIC CAPTAIN'S LOG</b><p>${G.log.length?G.log.map(x=>x.replace(/[<>]/g,'')).join('<br>'):'No entries yet. Fly, investigate and command the fleet to build your history.'}</p></div>`;
+  $('lgContent').innerHTML=h;
+  $('lgTabs').querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;render()});
+  $('lgContent').querySelectorAll('[data-lg]').forEach(b=>b.onclick=()=>act(b.dataset.lg));
+ }
+ function jump(label){
+   const scenes=['HYPERSPACE TUNNEL','NEBULA CROSSING','STELLAR FLYBY','ASTEROID PASSAGE','FLEET TRANSIT','PLANETARY APPROACH'];
+   $('lgJumpText').textContent=label||scenes[Math.floor(Math.random()*scenes.length)];$('lgJumpScene').classList.add('on');
+   setTimeout(()=>{$('lgJumpScene').classList.remove('on');notice('NAVIGATION TRANSITION COMPLETE')},2300)
+ }
+ function act(a){
+   if(a==='arc'){G.arcStep++;G.xp+=120;if(G.arcStep>=5){G.arcStep=0;G.arc++;G.rank=Math.min(6,G.rank+1);log('Operation completed · command rank advanced')}else log('Operation stage '+G.arcStep+' completed');notice('OPERATION UPDATED')}
+   else if(a==='op'){G.arc=Math.floor(Math.random()*4);G.arcStep=0;log('New chained operation accepted');notice('NEW OPERATION LOADED')}
+   else if(a==='approach'){jump(['ORBITAL CITY APPROACH','MOON BASE TRAFFIC CORRIDOR','CAPITAL BERTH APPROACH','ASTEROID FACILITY APPROACH'][Math.floor(Math.random()*4)]);log('Entered controlled approach zone')}
+   else if(a.startsWith('enc')){const names=['Survivors recovered','Derelict boarded','Pirate force engaged','Convoy escort accepted','Anomaly catalogued','Wreckage field scanned'];G.xp+=75;G.discoveries++;G.salvage.unshift(['Alloy Plate','Reactor Coupler','Weapon Servo','Ancient Data Core'][Math.floor(Math.random()*4)]);G.salvage=G.salvage.slice(0,18);log(names[+a.slice(3)]||'Encounter resolved');notice('ENCOUNTER RESOLVED · SALVAGE RECOVERED')}
+   else if(a==='train'){G.academy=Math.min(8,G.academy+1);G.xp+=100;log('Academy certification completed');notice('ACADEMY CERTIFICATION EARNED')}
+   else if(a==='wing'){G.activeWing='Rook';log('Wingman Rook deployed');notice('ROOK JOINED YOUR WING')}
+   else if(a==='dismiss'){G.activeWing=null;log('Wingman returned to base')}
+   else if(a==='attack'||a==='defend'){notice('WING ORDER · '+a.toUpperCase());log('Wing order: '+a)}
+   else if(a==='fire'){notice('CAPITAL BATTERIES FIRING');log('All capital batteries fired')}
+   else if(a==='fighters'){if(G.capital.fighters>0){G.capital.fighters--;notice('FIGHTER SQUADRON LAUNCHED');log('Fighter squadron deployed')}}
+   else if(a==='repair'){G.capital.fore=G.capital.aft=G.capital.port=G.capital.starboard=Math.min(100,G.capital.fore+10);notice('DAMAGE CONTROL TEAMS DEPLOYED')}
+   else if(a==='salvage'){G.salvage.unshift(['Titanium Lattice','Shield Emitter','Drive Crystal','Blueprint Fragment'][Math.floor(Math.random()*4)]);G.salvage=G.salvage.slice(0,18);log('Local wreckage salvaged');notice('SALVAGE STORED')}
+   else if(a==='event'){G.danger=clamp(G.danger+Math.round(Math.random()*20-10),5,95);G.trade=clamp(G.trade+Math.round(Math.random()*18-9),5,95);G.security=clamp(100-G.danger+Math.round(Math.random()*10-5),5,95);log('Galaxy event changed regional conditions');notice('SECTOR CONDITIONS UPDATED')}
+   else if(a==='jump'){jump();log('Jump corridor traversed')}
+   else if(a==='cmd'){notice('COMMAND NODE SYNCHRONIZED')}
+   save();render()
+ }
+ $('lgAccess').onclick=()=>{$('lgPanel').classList.add('on');render()};$('lgClose').onclick=()=>$('lgPanel').classList.remove('on');
+ // Organic low-frequency galaxy motion. No DOM rebuild unless panel is open.
+ setInterval(()=>{if(document.hidden)return;G.danger=clamp(G.danger+(Math.random()<.5?-1:1),5,95);G.trade=clamp(G.trade+(Math.random()<.5?-1:1),5,95);save()},45000);
+ // Free-flight encounter detector. Long cooldown and non-invasive notification only.
+ setInterval(()=>{try{if(document.hidden||typeof state==='undefined'||state!=='flight')return;const now=Date.now();if(now-G.lastEncounter<150000)return;if(Math.random()<.28){G.lastEncounter=now;G.encounter=['DISTRESS SIGNAL','DERELICT CONTACT','UNKNOWN ENERGY SIGNATURE','CONVOY REQUEST','PIRATE TRANSMISSION'][Math.floor(Math.random()*5)];save();notice(G.encounter+' · OPEN LIVING GALAXY TO INVESTIGATE');log('Sensor contact: '+G.encounter)}}catch(e){}},30000);
+ log('Living Galaxy systems initialized');render();
+})();
+</script>
+
 <script id="space-gods-runtime-enhancement">
 (()=>{
  'use strict';
@@ -2197,12 +2279,12 @@ addEventListener('pointerdown',()=>{const h=document.getElementById('mouseHint')
    requestAnimationFrame(frame)
  }
  const K={ArrowUp:'up',w:'up',W:'up',ArrowDown:'down',s:'down',S:'down',ArrowLeft:'left',a:'left',A:'left',ArrowRight:'right',d:'right',D:'right',' ':'brake','+':'faster','=':'faster','-':'slower'};
- addEventListener('keydown',e=>{if(P.active&&K[e.key]){P.held.add(K[e.key]);e.preventDefault()}},true);
+ addEventListener('keydown',e=>{if(P.active&&!e.target.closest?.('#sgFlightDrawer')&&K[e.key]){P.held.add(K[e.key]);e.preventDefault()}},true);
  addEventListener('keyup',e=>{if(K[e.key])P.held.delete(K[e.key])},true);
- document.addEventListener('pointerdown',e=>{if(P.active&&!e.target.closest?.('button,input,select'))P.drag={x:e.clientX,y:e.clientY,id:e.pointerId}},true);
+ document.addEventListener('pointerdown',e=>{if(P.active&&!e.target.closest?.('#sgFlightDrawer,button,input,select'))P.drag={x:e.clientX,y:e.clientY,id:e.pointerId}},true);
  document.addEventListener('pointermove',e=>{if(!P.active||!P.drag||P.drag.id!==e.pointerId)return;let dx=e.clientX-P.drag.x,dy=e.clientY-P.drag.y;P.drag.x=e.clientX;P.drag.y=e.clientY;ship.yaw+=dx*.004;ship.pitch=clamp(ship.pitch-dy*.003,-1,1)},true);
  document.addEventListener('pointerup',()=>P.drag=null,true);
- document.addEventListener('wheel',e=>{if(P.active){e.preventDefault();ship.throttle=clamp(ship.throttle-Math.sign(e.deltaY)*.06,-.35,1)}},{capture:true,passive:false});
+ document.addEventListener('wheel',e=>{if(P.active&&!e.target.closest?.('#sgFlightDrawer')){e.preventDefault();ship.throttle=clamp(ship.throttle-Math.sign(e.deltaY)*.06,-.35,1)}},{capture:true,passive:false});
 
  // DO NOT prevent the original terminal click. Original mission launch runs normally.
  // After it has executed, take over only the actual flight movement.
@@ -2214,6 +2296,150 @@ addEventListener('pointerdown',()=>{const h=document.getElementById('mouseHint')
 
  window.cleanMissionFlight={takeover,state:P};
  requestAnimationFrame(frame);
+})();
+</script>
+
+<style id="compact-flight-ui">
+#world{width:100vw!important;height:100dvh!important;min-height:0!important}
+#hud .brand{display:none!important}
+#hud .top{justify-content:flex-end!important}
+#hud .top button,#hud .bottom button,#hud .flighttools button{font-size:11px!important;padding:6px 9px!important;min-height:30px!important}
+#hud .bottom{max-width:calc(100vw - 24px);flex-wrap:wrap;justify-content:center;gap:4px!important}
+#hud .flighttools{bottom:160px!important;max-width:185px!important;gap:4px!important}
+#hud .readout{font-size:10px!important;line-height:1.6!important;top:50px!important}
+#hud .readout strong{font-size:19px!important}
+#hud .objective{top:50px!important;font-size:11px!important;max-width:38%!important}
+#hud .objective strong{font-size:13px!important}
+#hud .contractHUD{top:125px!important;font-size:10px!important}
+#hud .throttle{width:96px!important;padding:8px!important;bottom:65px!important}
+#hud .radio{display:none!important}
+#hud .mousehint,#hud #moreControls,#sgBuriedSystems:empty{display:none!important}
+#hud #radar{width:105px!important;height:68px!important;bottom:190px!important}
+@media(pointer:fine){#hud #stick{display:none!important}}
+#sgMenuToggle{position:fixed;right:12px;top:10px;z-index:13001;font-size:11px;padding:7px 10px;min-height:30px}
+#hud .top{right:110px!important}
+#sgFlightDrawer{position:fixed;right:12px;top:50px;z-index:13000;width:min(360px,calc(100vw - 24px));max-height:calc(100dvh - 65px);overflow:auto;padding:14px;background:#061421f5;border:1px solid #4c829a;border-radius:12px;box-shadow:0 15px 60px #000a}
+#sgFlightDrawer[hidden]{display:none!important}
+#sgFlightDrawer h2{font-size:17px;margin:0 0 8px}
+#sgFlightDrawer p{font-size:11px;margin:6px 0 12px}
+#sgDrawerActions{display:flex;flex-wrap:wrap;gap:6px}
+#sgFlightDrawer #sgDrawerActions button{position:static!important;inset:auto!important;transform:none!important;width:auto!important;min-height:30px!important;margin:0!important;padding:7px 9px!important;font-size:11px!important;flex:1 1 135px;pointer-events:auto!important}
+#sgFlightDrawer label{display:flex;gap:10px;align-items:center;font-size:12px;margin:12px 0}
+#sgFlightDrawer input{width:130px}
+body.sg-ui-small #hud .readout,body.sg-ui-small #hud .objective,body.sg-ui-small #hud .contractHUD,body.sg-ui-small #hud .throttle,body.sg-ui-small #hud .flighttools,body.sg-ui-small #hud .bottom{zoom:.8}
+body.sg-ui-normal #hud .readout,body.sg-ui-normal #hud .objective,body.sg-ui-normal #hud .contractHUD,body.sg-ui-normal #hud .throttle,body.sg-ui-normal #hud .flighttools,body.sg-ui-normal #hud .bottom{zoom:1}
+@media(max-width:600px){#hud .top{left:8px!important;gap:3px}#hud .top button{font-size:10px!important;padding:5px!important}#hud .bottom button{font-size:10px!important;padding:6px!important}#hud .flighttools{bottom:180px!important;max-width:150px!important}#hud .objective{max-width:45%!important}}
+</style>
+<script id="compact-flight-menus">
+(()=>{
+ const drawer=document.createElement('aside');drawer.id='sgFlightDrawer';drawer.hidden=true;drawer.setAttribute('aria-label','Extra flight menus');
+ drawer.innerHTML='<h2>Systems & menus</h2><p>Extra menus live here. Press ~ / ` again to close. Flight is not automatically paused.</p><label>HUD size <select id="sgHudSize"><option value="small">Small (80%)</option><option value="normal">Normal (100%)</option></select></label><div id="sgDrawerActions"></div>';
+ const toggle=document.createElement('button');toggle.id='sgMenuToggle';toggle.textContent='~ Menus';toggle.type='button';toggle.setAttribute('aria-controls',drawer.id);toggle.setAttribute('aria-expanded','false');
+ document.body.append(drawer,toggle);
+ function setOpen(v){drawer.hidden=!v;toggle.setAttribute('aria-expanded',String(v));if(v){try{keys.clear()}catch(e){};const p=window.cleanMissionFlight?.state;if(p){p.held.clear();p.drag=null}if(document.pointerLockElement){try{releaseMouse()}catch(e){document.exitPointerLock()}}}}
+ toggle.onclick=()=>setOpen(drawer.hidden);
+ addEventListener('keydown',e=>{if(e.target.closest?.('input,textarea,select,[contenteditable="true"]'))return;if(e.code==='Backquote'||e.key==='~'||e.key==='`'){e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)setOpen(drawer.hidden)}else if(e.key==='Escape'&&!drawer.hidden){e.preventDefault();e.stopImmediatePropagation();setOpen(false)}},true);
+ const actions=drawer.querySelector('#sgDrawerActions');
+ const keepTop=new Set(['view','mouse','pause','openDocking']);
+ const keepOps=new Set(['scan','fire','combatTarget']);
+ const keepBottom=new Set(['target','auto','boost','nav','action']);
+ function organize(){
+  document.querySelectorAll('#hud .top .tools button,#hud .flighttools button,#hud .bottom button').forEach(b=>{
+   const keep=b.closest('.tools')?keepTop:b.closest('.flighttools')?keepOps:keepBottom;
+   if(!keep.has(b.id))actions.appendChild(b);
+  });
+  ['freshSWAccess','lgAccess'].forEach(id=>{const b=document.getElementById(id);if(b&&b.parentElement!==actions)actions.appendChild(b)});
+  document.querySelectorAll('#sgBuriedSystems button').forEach(b=>actions.appendChild(b));
+ }
+ organize();setTimeout(organize,500);setTimeout(organize,1500);
+ const hud=document.getElementById('hud');if(hud)new MutationObserver(organize).observe(hud,{childList:true,subtree:true});
+ actions.addEventListener('click',e=>{if(e.target.closest('button'))setOpen(false)});
+ const size=drawer.querySelector('#sgHudSize');function applySize(){document.body.classList.toggle('sg-ui-small',size.value==='small');document.body.classList.toggle('sg-ui-normal',size.value!=='small');try{localStorage.setItem('spaceGods.compactHUD',size.value)}catch(e){}}
+ try{size.value=localStorage.getItem('spaceGods.compactHUD')||'small'}catch(e){size.value='small'}size.onchange=applySize;applySize();
+})();
+</script>
+
+
+<style id="sg-consolidation-pass">
+/* SPACE GODS CONSOLIDATION PASS */
+#sgMasterMenu{position:fixed;inset:0;z-index:20000;display:none;align-items:flex-start;justify-content:center;padding:22px;background:rgba(1,6,12,.86);backdrop-filter:blur(8px)}
+#sgMasterMenu.on{display:flex}#sgMasterMenu .sg-shell{width:min(860px,100%);max-height:calc(100dvh - 44px);overflow:auto;border:1px solid #47798f;border-radius:16px;background:linear-gradient(145deg,#0b2030f8,#040b13fa);box-shadow:0 28px 100px #000c;padding:18px}
+.sg-master-head{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #294b5c;padding-bottom:12px}.sg-master-head h2{margin:0;font-size:21px;letter-spacing:.08em}.sg-master-head small{color:#83b9cb}.sg-master-close{width:auto!important}
+.sg-master-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin:15px 0}.sg-master-grid button{text-align:left;min-height:70px;padding:12px}.sg-master-grid b,.sg-master-grid span{display:block}.sg-master-grid span{font-size:10px;color:#91b5c5;margin-top:5px;line-height:1.35}.sg-master-grid button.primary b{color:#062332}
+.sg-master-section{border-top:1px solid #244454;padding-top:13px;margin-top:13px}.sg-master-section h3{font-size:12px;letter-spacing:.15em;color:#ffd88a;margin:0 0 9px}.sg-quick{display:flex;flex-wrap:wrap;gap:7px}.sg-quick button{flex:1 1 130px;font-size:11px;padding:9px}
+#sgMenuToggle{top:10px!important;right:12px!important;z-index:15000!important}#freshSWAccess,#lgAccess{display:none!important}
+body.sg-menu-open #hud{filter:brightness(.65)}
+/* One authoritative compact flight HUD layout */
+#hud .flighttools{max-width:180px!important}#hud .flighttools button:not(#fire):not(#scan):not(#combatTarget){display:none!important}
+#hud .bottom{z-index:20}.moreControls{display:none!important}.mousehint{opacity:.55}
+@media(max-width:700px){#sgMasterMenu{padding:8px}.sg-master-grid{grid-template-columns:1fr 1fr}#sgMasterMenu .sg-shell{max-height:calc(100dvh - 16px);padding:12px}.sg-master-grid button{min-height:60px}.sg-master-head h2{font-size:17px}}
+@media(max-width:430px){.sg-master-grid{grid-template-columns:1fr}.sg-master-grid button{min-height:52px}}
+</style>
+<div id="sgMasterMenu" aria-hidden="true">
+ <div class="sg-shell">
+  <div class="sg-master-head"><div><small>SPACE GODS // SHIP COMPUTER</small><h2>MASTER MENU</h2></div><button id="sgMasterClose" class="sg-master-close">RETURN · M</button></div>
+  <div class="sg-master-grid">
+   <button data-sg="missions" class="primary"><b>MISSIONS</b><span>Contracts, active objective, rewards and launch</span></button>
+   <button data-sg="nav"><b>GALAXY / JUMP</b><span>Destination map and route home</span></button>
+   <button data-sg="command"><b>COMMAND CENTER</b><span>Gods Base operations and command network</span></button>
+   <button data-sg="dock"><b>DOCKING</b><span>Request clearance, land, station services</span></button>
+   <button data-sg="shipworks"><b>GODS SHIPWORKS</b><span>Design, construct and select vessels</span></button>
+   <button data-sg="galaxy"><b>LIVING GALAXY</b><span>Encounters, wingmen, factions and sector events</span></button>
+   <button data-sg="academy"><b>PILOT ACADEMY</b><span>Training and certifications</span></button>
+   <button data-sg="city"><b>CITY / STATION</b><span>Construction and settlement systems</span></button>
+   <button data-sg="controls"><b>CONTROLS & SAVES</b><span>Save slots, sensitivity, camera and sound</span></button>
+  </div>
+  <div class="sg-master-section"><h3>FLIGHT QUICK ACTIONS</h3><div class="sg-quick"><button data-click="target">Target</button><button data-click="scan">Scan</button><button data-click="auto">Approach</button><button data-click="boost">Boost</button><button data-click="fire">Fire</button><button data-click="power">Power</button></div></div>
+  <div class="sg-master-section"><h3>NAVIGATION RULE</h3><p style="margin:0;font-size:12px">M always opens this menu. Esc closes the topmost Space Gods panel. Jump / Galaxy is always one click away, so you cannot lose the route back to Gods Base.</p></div>
+ </div>
+</div>
+<script id="sg-consolidation-js">
+(()=>{
+ 'use strict'; if(window.__SG_CONSOLIDATED__)return;window.__SG_CONSOLIDATED__=true;
+ const $=id=>document.getElementById(id), master=$('sgMasterMenu');
+ const visible=el=>el&&getComputedStyle(el).display!=='none'&&!el.classList.contains('hidden')&&!el.hidden;
+ function clickId(id){const b=$(id);if(b){b.click();return true}return false}
+ function buttonText(...words){const W=words.map(x=>x.toUpperCase());return [...document.querySelectorAll('button')].find(b=>{const t=(b.textContent||'').toUpperCase();return W.every(w=>t.includes(w))})}
+ function closeMaster(){master.classList.remove('on');master.setAttribute('aria-hidden','true');document.body.classList.remove('sg-menu-open')}
+ function openMaster(){
+   const old=$('sgFlightDrawer');if(old)old.hidden=true;
+   master.classList.add('on');master.setAttribute('aria-hidden','false');document.body.classList.add('sg-menu-open');
+   try{keys.clear()}catch(e){};try{window.cleanMissionFlight?.state?.held?.clear()}catch(e){};try{if(document.pointerLockElement)document.exitPointerLock()}catch(e){}
+ }
+ function launch(kind){closeMaster();setTimeout(()=>{
+   if(kind==='nav'){if(!clickId('nav'))clickId('jump');return}
+   if(kind==='dock'){clickId('openDocking')||clickId('dock');return}
+   if(kind==='controls'){clickId('flightControlButton')||clickId('pause');return}
+   if(kind==='shipworks'){const b=$('freshSWAccess')||buttonText('SHIPWORKS');if(b)b.click();return}
+   if(kind==='galaxy'){const b=$('lgAccess')||buttonText('LIVING','GALAXY');if(b)b.click();return}
+   if(kind==='command'){clickId('openCommand')||clickId('commandCenter')||buttonText('COMMAND','CENTER')?.click();return}
+   if(kind==='academy'){buttonText('PILOT','ACADEMY')?.click();return}
+   if(kind==='city'){(buttonText('CITY','SIM')||buttonText('CITY','STATION'))?.click();return}
+   if(kind==='missions'){
+     const missionTab=$('dockTabMissions')||$('tabMissions')||buttonText('MISSIONS');
+     if(visible($('dockPanel'))&&missionTab){missionTab.click();return}
+     const cmd=buttonText('MISSION','BOARD')||buttonText('MISSIONS');if(cmd){cmd.click();return}
+     if(clickId('openDocking'))setTimeout(()=>{($('dockTabMissions')||$('tabMissions')||buttonText('MISSIONS'))?.click()},120);
+   }
+ },30)}
+ $('sgMasterClose').onclick=closeMaster;
+ master.addEventListener('click',e=>{if(e.target===master)closeMaster();const b=e.target.closest('button[data-sg],button[data-click]');if(!b)return;if(b.dataset.click){closeMaster();setTimeout(()=>clickId(b.dataset.click),25)}else launch(b.dataset.sg)});
+ const oldToggle=$('sgMenuToggle');if(oldToggle){oldToggle.textContent='M · MENU';oldToggle.title='Master menu';oldToggle.onclick=openMaster}
+ // Esc = one layer back. M = master menu everywhere except while typing.
+ addEventListener('keydown',e=>{
+   if(e.target.closest?.('input,textarea,select,[contenteditable="true"]'))return;
+   if((e.key==='m'||e.key==='M')&&!e.ctrlKey&&!e.altKey&&!e.metaKey){e.preventDefault();e.stopImmediatePropagation();master.classList.contains('on')?closeMaster():openMaster();return}
+   if(e.key==='Escape'){
+     if(master.classList.contains('on')){e.preventDefault();e.stopImmediatePropagation();closeMaster();return}
+     const closers=[['freshSW','freshSWClose'],['lgPanel','lgClose'],['flightControlMenu','flightControlClose'],['commandPanel','closeCommand'],['dockingPanel','closeDocking'],['navPanel','closeNav']];
+     for(const [panel,close] of closers){if(visible($(panel))&&$(close)){e.preventDefault();e.stopImmediatePropagation();$(close).click();return}}
+   }
+ },true);
+ // Reduce duplicate decorative background work when page is hidden; expose one scheduler hook for future systems.
+ window.SpaceGodsScheduler=window.SpaceGodsScheduler||{paused:false,tick:0};
+ document.addEventListener('visibilitychange',()=>window.SpaceGodsScheduler.paused=document.hidden);
+ // Always keep the master-menu button available after dynamic UI rebuilds.
+ new MutationObserver(()=>{if(oldToggle&&!document.body.contains(oldToggle))document.body.appendChild(oldToggle)}).observe(document.body,{childList:true,subtree:true});
 })();
 </script>
 </body></html>
